@@ -1,0 +1,35 @@
+# Built artifacts
+**/build/
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Android Studio & IntelliJ files
+.idea/
+*.iml
+*.ipr
+*.iws
+.navigation/
+capture/
+
+# Gradle files
+.gradle/
+build/
+gradle-app.setting
+!gradle-wrapper.jar
+
+# Local configuration files (contains local paths, keys, etc.)
+local.properties
+
+# Log files
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.jks
+*.keystore
+secrets.properties
