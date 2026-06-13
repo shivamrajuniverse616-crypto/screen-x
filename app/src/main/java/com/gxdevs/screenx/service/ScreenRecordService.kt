@@ -412,6 +412,8 @@ class ScreenRecordService : LifecycleService() {
             else -> screenWidth > screenHeight
         }
         val longSide = when (resolutionSetting) {
+            "4K" -> 3840
+            "1440p" -> 2560
             "1080p" -> 1920
             "720p" -> 1280
             "480p" -> 854

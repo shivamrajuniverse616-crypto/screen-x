@@ -36,13 +36,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Duo
 import androidx.compose.material.icons.filled.Hearing
@@ -53,10 +53,12 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.StayCurrentLandscape
 import androidx.compose.material.icons.filled.StayCurrentPortrait
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Card
@@ -106,7 +108,10 @@ import androidx.media3.ui.PlayerView
 import com.gxdevs.screenx.data.SettingsManager
 import com.gxdevs.screenx.utils.RecordedVideo
 import com.gxdevs.screenx.utils.VideoHelper
+import com.gxdevs.screenx.utils.DeviceCapabilitiesHelper
 import kotlinx.coroutines.launch
+
+
 
 // Spring-based bouncy clickable modifier
 fun Modifier.bouncyClickable(
@@ -540,66 +545,246 @@ fun HomeScreen(
                 }
             }
 
-            // Ready to Record Card Container
-            Card(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
+            // Bento Grid Layout
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 4.dp)
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
+                // Row 1: Tall Record Card + Right Column (Storage & Audio)
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 20.dp, horizontal = 16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .height(210.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = if (isRecordingActive) "Recording Screen..." else "Ready to Record",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // Big Record Button
-                    Box(
-                        contentAlignment = Alignment.Center,
+                    // Tall Record Card (2x height)
+                    Card(
+                        shape = RoundedCornerShape(28.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        ),
                         modifier = Modifier
-                            .size(136.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary)
+                            .weight(1f)
+                            .fillMaxHeight()
                             .bouncyClickable { onStartRecordingClick() }
                     ) {
-                        // Donut style ring inside
-                        Box(
+                        Column(
                             modifier = Modifier
-                                .size(52.dp)
-                                .clip(CircleShape)
-                                .background(Color.Transparent)
-                                .border(
-                                    width = 12.dp,
-                                    color = Color.White,
-                                    shape = CircleShape
+                                .fillMaxSize()
+                                .padding(20.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Record target icon at the top
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.2f))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.RadioButtonChecked,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
                                 )
-                        )
+                            }
+                            
+                            Column {
+                                Text(
+                                    text = if (isRecordingActive) "Recording" else "Record",
+                                    color = Color.White,
+                                    fontSize = 24.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (isRecordingActive) "Tap to stop" else "Tap to start",
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // 3 Status Info Toggles row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                    // Right Column (Storage + Audio Source)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Toggle 1: Resolution
-                        StatusToggleItem(
-                            icon = Icons.Default.Videocam,
-                            label = resolution,
-                            onClick = {
+                        // Storage Card
+                        val freeSpaceGB = remember {
+                            try {
+                                val stat = android.os.StatFs(android.os.Environment.getDataDirectory().path)
+                                (stat.blockSizeLong * stat.availableBlocksLong) / (1024 * 1024 * 1024)
+                            } catch (_: Exception) {
+                                42L
+                            }
+                        }
+                        val usedPercent = remember {
+                            try {
+                                val stat = android.os.StatFs(android.os.Environment.getDataDirectory().path)
+                                val total = stat.blockSizeLong * stat.blockCountLong
+                                val free = stat.blockSizeLong * stat.availableBlocksLong
+                                if (total > 0) (((total - free) * 100) / total).toInt() else 24
+                            } catch (_: Exception) {
+                                24
+                            }
+                        }
+
+                        Card(
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Storage,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    
+                                    // Badge
+                                    Box(
+                                        modifier = Modifier
+                                            .background(
+                                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f),
+                                                shape = RoundedCornerShape(6.dp)
+                                            )
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "$usedPercent% Used",
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                
+                                Column {
+                                    Text(
+                                        text = "$freeSpaceGB GB",
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Available Space",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        // Audio Source Card
+                        Card(
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .bouncyClickable { showAudioDialog = true }
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f))
+                                ) {
+                                    Icon(
+                                        imageVector = when (audioSource) {
+                                            "Mic" -> Icons.Default.Mic
+                                            "System" -> Icons.AutoMirrored.Filled.VolumeUp
+                                            "MicSystem" -> Icons.Default.Hearing
+                                            else -> Icons.Default.MicOff
+                                        },
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                
+                                Column {
+                                    Text(
+                                        text = when (audioSource) {
+                                            "Mic" -> "Microphone"
+                                            "System" -> "Device Audio"
+                                            "MicSystem" -> "Device + Mic"
+                                            else -> "Muted"
+                                        },
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Audio Source",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Row 2: Resolution & Orientation side-by-side
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(68.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Resolution Card
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .bouncyClickable {
                                 val nextRes = when (resolution) {
                                     "1080p" -> "720p"
                                     "720p" -> "480p"
@@ -608,35 +793,49 @@ fun HomeScreen(
                                 }
                                 coroutineScope.launch { settingsManager.setResolution(nextRes) }
                             }
-                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Videocam,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "RESOLUTION",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "$resolution / ${fps}fps",
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
 
-                        // Toggle 2: Audio Source
-                        StatusToggleItem(
-                            icon = when (audioSource) {
-                                "Mic" -> Icons.Default.Mic
-                                "System" -> Icons.AutoMirrored.Filled.VolumeUp
-                                "MicSystem" -> Icons.Default.Hearing
-                                else -> Icons.Default.MicOff
-                            },
-                            label = when (audioSource) {
-                                "Mic" -> "Microphone"
-                                "System" -> "Device Audio"
-                                "MicSystem" -> "Mic + Device"
-                                else -> "Muted"
-                            },
-                            isActive = audioSource != "None",
-                            onClick = { showAudioDialog = true }
-                        )
-
-                        // Toggle 3: Orientation
-                        StatusToggleItem(
-                            icon = when (orientation) {
-                                "Auto" -> Icons.Default.ScreenRotation
-                                "Portrait" -> Icons.Default.StayCurrentPortrait
-                                else -> Icons.Default.StayCurrentLandscape
-                            },
-                            label = orientation,
-                            onClick = {
+                    // Orientation Card
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .bouncyClickable {
                                 val nextOri = when (orientation) {
                                     "Auto" -> "Portrait"
                                     "Portrait" -> "Landscape"
@@ -644,25 +843,74 @@ fun HomeScreen(
                                 }
                                 coroutineScope.launch { settingsManager.setOrientation(nextOri) }
                             }
-                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = when (orientation) {
+                                    "Auto" -> Icons.Default.ScreenRotation
+                                    "Portrait" -> Icons.Default.StayCurrentPortrait
+                                    else -> Icons.Default.StayCurrentLandscape
+                                },
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "ORIENTATION",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (orientation == "Auto") "Auto Rotation" else "$orientation Mode",
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Recent Recordings (under control panel)
+            // Gallery / Recent Recordings Section
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp, vertical = 8.dp)
             ) {
-                Text(
-                    text = "Recent Recordings",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Gallery",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = "View All",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable {
+                            Toast.makeText(context, "Gallery feature coming soon!", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 if (videos.isEmpty()) {
                     Card(
@@ -715,83 +963,73 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    val internalAudioBg = if (isInternalAudioEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
-                    val internalAudioText = if (isInternalAudioEnabled) Color.White else MaterialTheme.colorScheme.onSurface
-                    
-                    Surface(
-                        shape = RoundedCornerShape(24.dp),
-                        color = internalAudioBg,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .bouncyClickable {
-                                coroutineScope.launch {
-                                    val nextSource = when (audioSource) {
-                                        "Mic" -> "MicSystem"
-                                        "MicSystem" -> "Mic"
-                                        "System" -> "None"
-                                        "None" -> "System"
-                                        else -> "Mic"
-                                    }
-                                    settingsManager.setAudioSource(nextSource)
-                                }
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                contentDescription = null,
-                                tint = internalAudioText,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Internal Audio",
-                                color = internalAudioText,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                
+                // Trim Video Premium Card (sole quick tool)
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFF1B1B1D)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(80.dp)
+                        .bouncyClickable {
+                            Toast.makeText(context, "Video Editor coming soon!", Toast.LENGTH_SHORT).show()
                         }
-                    }
-
-                    // Screenshot Button
-                    Surface(
-                        shape = RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.surface,
+                ) {
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .bouncyClickable { onScreenshotClick() }
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.1f))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCut,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text(
+                                    text = "Trim Video",
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Edit your recent captures",
+                                    color = Color.Gray,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                        
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.15f))
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Image,
+                                imageVector = Icons.Default.ChevronRight,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Screenshot",
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -1010,7 +1248,7 @@ fun HomeScreen(
     if (showResDialog) {
         OptionSelectionDialog(
             title = "Select Resolution",
-            options = listOf("1080p", "720p", "480p", "Original"),
+            options = DeviceCapabilitiesHelper.getResolutionOptions(context),
             selectedOption = resolution,
             onDismiss = { showResDialog = false },
             onSelect = {
@@ -1023,7 +1261,7 @@ fun HomeScreen(
     if (showFpsDialog) {
         OptionSelectionDialog(
             title = "Select Frame Rate",
-            options = listOf("15", "30", "45", "60"),
+            options = DeviceCapabilitiesHelper.getFpsOptions(context),
             selectedOption = fps.toString(),
             onDismiss = { showFpsDialog = false },
             onSelect = {
@@ -1034,15 +1272,16 @@ fun HomeScreen(
     }
 
     if (showBitrateDialog) {
-        val mapping = mapOf("2 Mbps" to 2000000, "4 Mbps" to 4000000, "8 Mbps" to 8000000, "12 Mbps" to 12000000, "15 Mbps" to 15000000)
+        val options = DeviceCapabilitiesHelper.getBitrateOptions()
         val selectedString = "${bitrate / 1000000} Mbps"
         OptionSelectionDialog(
             title = "Select Bitrate",
-            options = mapping.keys.toList(),
+            options = options,
             selectedOption = selectedString,
             onDismiss = { showBitrateDialog = false },
             onSelect = {
-                coroutineScope.launch { settingsManager.setBitrate(mapping[it] ?: 8000000) }
+                val value = it.substringBefore(" Mbps").toInt() * 1000000
+                coroutineScope.launch { settingsManager.setBitrate(value) }
                 showBitrateDialog = false
             }
         )
@@ -1118,11 +1357,7 @@ fun HomeScreen(
                             settingsManager.setFloatingShowMode("All the time")
                             if (!com.gxdevs.screenx.service.ScreenRecordService.isRecording) {
                                 intent.action = com.gxdevs.screenx.service.ScreenRecordService.ACTION_START_FLOATING_ONLY
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                    context.startForegroundService(intent)
-                                } else {
-                                    context.startService(intent)
-                                }
+                                context.startForegroundService(intent)
                             }
                         }
                     }
@@ -1345,7 +1580,7 @@ fun BottomSheetMenuItem(
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1.1f)
         )
         Spacer(modifier = Modifier.width(16.dp))
         Text(
@@ -1353,7 +1588,8 @@ fun BottomSheetMenuItem(
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary, // Teal value
-            textAlign = TextAlign.End
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(0.9f)
         )
     }
 }
