@@ -19,6 +19,17 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.CirclePlay
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Film
+import com.composables.icons.lucide.LayoutGrid
+import com.composables.icons.lucide.List as LucideList
+import com.composables.icons.lucide.Play
+import com.composables.icons.lucide.Scissors
+import com.composables.icons.lucide.Share2
+import com.composables.icons.lucide.Trash2
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,7 +72,7 @@ fun GalleryScreen(
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = Lucide.ArrowLeft,
                             contentDescription = "Back"
                         )
                     }
@@ -73,7 +84,7 @@ fun GalleryScreen(
                         }
                     }) {
                         Icon(
-                            imageVector = if (isGridView) Icons.Default.List else Icons.Default.GridView,
+                            imageVector = if (isGridView) LucideList else Lucide.LayoutGrid,
                             contentDescription = "Toggle Layout"
                         )
                     }
@@ -99,7 +110,7 @@ fun GalleryScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Movie,
+                        imageVector = Lucide.Film,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                         modifier = Modifier.size(64.dp)
@@ -200,7 +211,7 @@ fun GalleryGridItem(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayCircle,
+                        imageVector = Lucide.CirclePlay,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(40.dp)
@@ -249,7 +260,7 @@ fun GalleryGridItem(
                         modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.MoreVert,
+                            imageVector = Lucide.EllipsisVertical,
                             contentDescription = "Options",
                             tint = Color.White,
                             modifier = Modifier.size(16.dp)
@@ -266,7 +277,7 @@ fun GalleryGridItem(
                                 expandedMenu = false
                                 onClick()
                             },
-                            leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) }
+                            leadingIcon = { Icon(Lucide.Play, contentDescription = null) }
                         )
                         DropdownMenuItem(
                             text = { Text("Trim Video") },
@@ -274,7 +285,7 @@ fun GalleryGridItem(
                                 expandedMenu = false
                                 android.widget.Toast.makeText(context, "Trim feature coming soon!", android.widget.Toast.LENGTH_SHORT).show()
                             },
-                            leadingIcon = { Icon(Icons.Default.ContentCut, contentDescription = null) }
+                            leadingIcon = { Icon(Lucide.Scissors, contentDescription = null) }
                         )
                         DropdownMenuItem(
                             text = { Text("Share") },
@@ -282,7 +293,7 @@ fun GalleryGridItem(
                                 expandedMenu = false
                                 VideoHelper.shareVideo(context, video)
                             },
-                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
+                            leadingIcon = { Icon(Lucide.Share2, contentDescription = null) }
                         )
                         DropdownMenuItem(
                             text = { Text("Delete") },
@@ -290,7 +301,7 @@ fun GalleryGridItem(
                                 expandedMenu = false
                                 onDelete()
                             },
-                            leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = Color.Red) }
+                            leadingIcon = { Icon(Lucide.Trash2, contentDescription = null, tint = Color.Red) }
                         )
                     }
                 }
@@ -345,7 +356,7 @@ fun GalleryListItem(
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Default.PlayCircle,
+                        imageVector = Lucide.CirclePlay,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(32.dp)
@@ -394,7 +405,7 @@ fun GalleryListItem(
             Box {
                 IconButton(onClick = { expandedMenu = true }) {
                     Icon(
-                        imageVector = Icons.Default.MoreVert,
+                        imageVector = Lucide.EllipsisVertical,
                         contentDescription = "Options",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -409,7 +420,7 @@ fun GalleryListItem(
                             expandedMenu = false
                             onClick()
                         },
-                        leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) }
+                        leadingIcon = { Icon(Lucide.Play, contentDescription = null) }
                     )
                     DropdownMenuItem(
                         text = { Text("Trim Video") },
@@ -417,7 +428,7 @@ fun GalleryListItem(
                             expandedMenu = false
                             android.widget.Toast.makeText(context, "Trim feature coming soon!", android.widget.Toast.LENGTH_SHORT).show()
                         },
-                        leadingIcon = { Icon(Icons.Default.ContentCut, contentDescription = null) }
+                        leadingIcon = { Icon(Lucide.Scissors, contentDescription = null) }
                     )
                     DropdownMenuItem(
                         text = { Text("Share") },
@@ -425,7 +436,7 @@ fun GalleryListItem(
                             expandedMenu = false
                             VideoHelper.shareVideo(context, video)
                         },
-                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
+                        leadingIcon = { Icon(Lucide.Share2, contentDescription = null) }
                     )
                     DropdownMenuItem(
                         text = { Text("Delete") },
@@ -433,7 +444,7 @@ fun GalleryListItem(
                             expandedMenu = false
                             onDelete()
                         },
-                        leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = Color.Red) }
+                        leadingIcon = { Icon(Lucide.Trash2, contentDescription = null, tint = Color.Red) }
                     )
                 }
             }

@@ -64,6 +64,10 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.4.0")
     implementation("androidx.compose.material:material-icons-extended")
 
+    // Lucide icons — modern, consistent icon set (1300+ icons)
+    implementation("com.composables:icons-lucide:1.1.0")
+
+
     // Jetpack DataStore for Settings
     implementation("androidx.datastore:datastore-preferences:1.2.1")
 

@@ -25,6 +25,19 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.CirclePlay
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.Crop
+import com.composables.icons.lucide.Eraser
+import com.composables.icons.lucide.FolderOpen
+import com.composables.icons.lucide.Pause
+import com.composables.icons.lucide.Play
+import com.composables.icons.lucide.RotateCcw
+import com.composables.icons.lucide.RotateCw
+import com.composables.icons.lucide.Save
+import com.composables.icons.lucide.Scissors
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -102,7 +115,7 @@ fun VideoTrimmerScreen(
                     title = { Text("Select Video to Edit", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                            Icon(Lucide.ArrowLeft, "Back")
                         }
                     }
                 )
@@ -127,7 +140,7 @@ fun VideoTrimmerScreen(
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                Icons.Default.FolderOpen, null,
+                                Lucide.FolderOpen, null,
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.size(32.dp)
                             )
@@ -302,7 +315,7 @@ fun TrimmerEditor(
                 navigationIcon = {
                     // Disabled while processing to prevent nav into invalid state
                     IconButton(onClick = onBackClick, enabled = !isProcessing) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                        Icon(Lucide.ArrowLeft, "Back")
                     }
                 },
                 actions = {
@@ -318,7 +331,7 @@ fun TrimmerEditor(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         enabled = !isProcessing
                     ) {
-                        Icon(Icons.Default.Save, null, modifier = Modifier.size(16.dp))
+                        Icon(Lucide.Save, null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(
                             when (editMode) {
@@ -391,7 +404,7 @@ fun TrimmerEditor(
                     IconButton(
                         onClick = { exoPlayer.seekTo((currentPosMs - 5000).coerceAtLeast(0)) }
                     ) {
-                        Icon(Icons.Default.Replay5, "-5s", tint = Color.White)
+                        Icon(Lucide.RotateCcw, "-5s", tint = Color.White)
                     }
                     Spacer(Modifier.width(8.dp))
                     IconButton(
@@ -401,7 +414,7 @@ fun TrimmerEditor(
                             .background(MaterialTheme.colorScheme.primary, CircleShape)
                     ) {
                         Icon(
-                            if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            if (isPlaying) Lucide.Pause else Lucide.Play,
                             "Play/Pause", tint = Color.White,
                             modifier = Modifier.size(28.dp)
                         )
@@ -410,7 +423,7 @@ fun TrimmerEditor(
                     IconButton(
                         onClick = { exoPlayer.seekTo((currentPosMs + 5000).coerceAtMost(videoDurationMs)) }
                     ) {
-                        Icon(Icons.Default.Forward5, "+5s", tint = Color.White)
+                        Icon(Lucide.RotateCw, "+5s", tint = Color.White)
                     }
 
                     Text(
@@ -451,9 +464,9 @@ fun TrimmerEditor(
                         ) {
                             Icon(
                                 imageVector = when (mode) {
-                                    EditMode.TRIM   -> Icons.Default.Crop
-                                    EditMode.DELETE -> Icons.Default.DeleteSweep
-                                    EditMode.SPLIT  -> Icons.Default.ContentCut
+                                    EditMode.TRIM   -> Lucide.Crop
+                                    EditMode.DELETE -> Lucide.Eraser
+                                    EditMode.SPLIT  -> Lucide.Scissors
                                 },
                                 contentDescription = null,
                                 tint = if (selected) Color.White else Color.Gray,
@@ -1224,7 +1237,7 @@ fun RecentSelectCard(video: RecordedVideo, onClick: () -> Unit) {
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    Icon(Icons.Default.PlayCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                    Icon(Lucide.CirclePlay, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                 }
             }
             Spacer(Modifier.width(16.dp))
@@ -1232,7 +1245,7 @@ fun RecentSelectCard(video: RecordedVideo, onClick: () -> Unit) {
                 Text(video.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("Duration: ${VideoHelper.formatDuration(video.duration)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(Lucide.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

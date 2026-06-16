@@ -38,29 +38,29 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.Duo
-import androidx.compose.material.icons.filled.Hearing
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.RadioButtonChecked
-import androidx.compose.material.icons.filled.ScreenRotation
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.StayCurrentLandscape
-import androidx.compose.material.icons.filled.StayCurrentPortrait
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material.icons.outlined.Settings
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Camera
+import com.composables.icons.lucide.ChevronRight
+import com.composables.icons.lucide.CircleDot
+import com.composables.icons.lucide.CirclePlay
+import com.composables.icons.lucide.Ear
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Film
+import com.composables.icons.lucide.HardDrive
+import com.composables.icons.lucide.Image
+import com.composables.icons.lucide.Mic
+import com.composables.icons.lucide.MicOff
+import com.composables.icons.lucide.Play
+import com.composables.icons.lucide.RotateCcw
+import com.composables.icons.lucide.Scissors
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Share2
+import com.composables.icons.lucide.Smartphone
+import com.composables.icons.lucide.Tablet
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.Video
+import com.composables.icons.lucide.Volume2
+import com.composables.icons.lucide.X
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -293,7 +293,7 @@ fun HomeScreen(
                     ) {
                         // Toggle 1: Resolution
                         StatusToggleItem(
-                            icon = Icons.Default.Videocam,
+                            icon = Lucide.Video,
                             label = resolution,
                             onClick = {
                                 val nextRes = when (resolution) {
@@ -309,10 +309,10 @@ fun HomeScreen(
                         // Toggle 2: Audio Source
                         StatusToggleItem(
                             icon = when (audioSource) {
-                                "Mic" -> Icons.Default.Mic
-                                "System" -> Icons.AutoMirrored.Filled.VolumeUp
-                                "MicSystem" -> Icons.Default.Hearing
-                                else -> Icons.Default.MicOff
+                                "Mic" -> Lucide.Mic
+                                "System" -> Lucide.Volume2
+                                "MicSystem" -> Lucide.Ear
+                                else -> Lucide.MicOff
                             },
                             label = when (audioSource) {
                                 "Mic" -> "Microphone"
@@ -327,9 +327,9 @@ fun HomeScreen(
                         // Toggle 3: Orientation
                         StatusToggleItem(
                             icon = when (orientation) {
-                                "Auto" -> Icons.Default.ScreenRotation
-                                "Portrait" -> Icons.Default.StayCurrentPortrait
-                                else -> Icons.Default.StayCurrentLandscape
+                                "Auto" -> Lucide.RotateCcw
+                                "Portrait" -> Lucide.Smartphone
+                                else -> Lucide.Tablet
                             },
                             label = orientation,
                             onClick = {
@@ -363,7 +363,7 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Duo,
+                            imageVector = Lucide.Camera,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(24.dp)
@@ -380,7 +380,7 @@ fun HomeScreen(
                         onClick = { showSettingsSheet = true }
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Settings,
+                            imageVector = Lucide.Settings,
                             contentDescription = "Open Settings",
                             modifier = Modifier.size(24.dp)
                         )
@@ -420,7 +420,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                imageVector = Lucide.Volume2,
                                 contentDescription = null,
                                 tint = internalAudioText,
                                 modifier = Modifier.size(16.dp)
@@ -449,7 +449,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Image,
+                                imageVector = Lucide.Image,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(16.dp)
@@ -523,7 +523,7 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Duo,
+                        imageVector = Lucide.Camera,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(32.dp)
@@ -540,7 +540,7 @@ fun HomeScreen(
                     onClick = { showSettingsSheet = true }
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.Settings,
+                        imageVector = Lucide.Settings,
                         contentDescription = "Open Settings",
                         modifier = Modifier.size(28.dp)
                     )
@@ -587,7 +587,7 @@ fun HomeScreen(
                                     .background(Color.White.copy(alpha = 0.2f))
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.RadioButtonChecked,
+                                    imageVector = Lucide.CircleDot,
                                     contentDescription = null,
                                     tint = Color.White,
                                     modifier = Modifier.size(24.dp)
@@ -667,7 +667,7 @@ fun HomeScreen(
                                             .background(MaterialTheme.colorScheme.surfaceVariant)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Storage,
+                                            imageVector = Lucide.HardDrive,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(16.dp)
@@ -734,10 +734,10 @@ fun HomeScreen(
                                 ) {
                                     Icon(
                                         imageVector = when (audioSource) {
-                                            "Mic" -> Icons.Default.Mic
-                                            "System" -> Icons.AutoMirrored.Filled.VolumeUp
-                                            "MicSystem" -> Icons.Default.Hearing
-                                            else -> Icons.Default.MicOff
+                                            "Mic" -> Lucide.Mic
+                                            "System" -> Lucide.Volume2
+                                            "MicSystem" -> Lucide.Ear
+                                            else -> Lucide.MicOff
                                         },
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary,
@@ -803,7 +803,7 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Videocam,
+                                imageVector = Lucide.Video,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
@@ -854,9 +854,9 @@ fun HomeScreen(
                         ) {
                             Icon(
                                 imageVector = when (orientation) {
-                                    "Auto" -> Icons.Default.ScreenRotation
-                                    "Portrait" -> Icons.Default.StayCurrentPortrait
-                                    else -> Icons.Default.StayCurrentLandscape
+                                    "Auto" -> Lucide.RotateCcw
+                                    "Portrait" -> Lucide.Smartphone
+                                    else -> Lucide.Tablet
                                 },
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -997,7 +997,7 @@ fun HomeScreen(
                                     .background(Color.White.copy(alpha = 0.1f))
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.ContentCut,
+                                    imageVector = Lucide.Scissors,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(20.dp)
@@ -1028,7 +1028,7 @@ fun HomeScreen(
                                 .background(Color.White.copy(alpha = 0.15f))
                         ) {
                             Icon(
-                                imageVector = Icons.Default.ChevronRight,
+                                imageVector = Lucide.ChevronRight,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(20.dp)
@@ -1080,7 +1080,7 @@ fun HomeScreen(
                                 .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Close,
+                                imageVector = Lucide.X,
                                 contentDescription = "Close settings",
                                 tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(18.dp)
@@ -1463,7 +1463,7 @@ fun RecentVideoCard(
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Default.PlayCircle,
+                        imageVector = Lucide.CirclePlay,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(28.dp)
@@ -1514,7 +1514,7 @@ fun RecentVideoCard(
             Box {
                 IconButton(onClick = { expandedMenu = true }) {
                     Icon(
-                        imageVector = Icons.Default.MoreVert,
+                        imageVector = Lucide.EllipsisVertical,
                         contentDescription = "Options",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1529,7 +1529,7 @@ fun RecentVideoCard(
                             expandedMenu = false
                             onClick()
                         },
-                        leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) }
+                        leadingIcon = { Icon(Lucide.Play, contentDescription = null) }
                     )
                     DropdownMenuItem(
                         text = { Text("Share") },
@@ -1537,7 +1537,7 @@ fun RecentVideoCard(
                             expandedMenu = false
                             onShare()
                         },
-                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
+                        leadingIcon = { Icon(Lucide.Share2, contentDescription = null) }
                     )
                     DropdownMenuItem(
                         text = { Text("Delete") },
@@ -1545,7 +1545,7 @@ fun RecentVideoCard(
                             expandedMenu = false
                             onDelete()
                         },
-                        leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = Color.Red) }
+                        leadingIcon = { Icon(Lucide.Trash2, contentDescription = null, tint = Color.Red) }
                     )
                 }
             }
@@ -1661,7 +1661,7 @@ fun VideoPlayerDialog(
                             .background(Color(0x66000000), CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Close,
+                            imageVector = Lucide.X,
                             contentDescription = "Close player",
                             tint = Color.White
                         )
@@ -1676,7 +1676,7 @@ fun VideoPlayerDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Movie,
+                        imageVector = Lucide.Film,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
                     )
@@ -1734,7 +1734,7 @@ fun RecentThumbnailItem(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayCircle,
+                        imageVector = Lucide.CirclePlay,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(36.dp)
@@ -1768,7 +1768,7 @@ fun RecentThumbnailItem(
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.MoreVert,
+                        imageVector = Lucide.EllipsisVertical,
                         contentDescription = "Options",
                         tint = Color.White,
                         modifier = Modifier.size(16.dp)
@@ -1784,7 +1784,7 @@ fun RecentThumbnailItem(
                             expandedMenu = false
                             onClick()
                         },
-                        leadingIcon = { Icon(Icons.Default.PlayArrow, contentDescription = null) }
+                        leadingIcon = { Icon(Lucide.Play, contentDescription = null) }
                     )
                     DropdownMenuItem(
                         text = { Text("Share") },
@@ -1792,7 +1792,7 @@ fun RecentThumbnailItem(
                             expandedMenu = false
                             VideoHelper.shareVideo(context, video)
                         },
-                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
+                        leadingIcon = { Icon(Lucide.Share2, contentDescription = null) }
                     )
                     DropdownMenuItem(
                         text = { Text("Delete") },
@@ -1800,7 +1800,7 @@ fun RecentThumbnailItem(
                             expandedMenu = false
                             onDelete()
                         },
-                        leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = Color.Red) }
+                        leadingIcon = { Icon(Lucide.Trash2, contentDescription = null, tint = Color.Red) }
                     )
                 }
             }
