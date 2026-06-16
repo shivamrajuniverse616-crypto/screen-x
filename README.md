@@ -53,8 +53,8 @@
 * **Format Control:** Generates highly compatible `.mp4` video files using Android's hardware-accelerated MediaCodec API.
 * **Dynamic Orientation:** Automatically adapts recording orientation based on your device state.
 
-### 🎙️ Multi-Channel Audio Capture
-* **Audio Sources:** Record clear external microphone audio, internal system audio (Android 10+), or both simultaneously.
+### 🎙️ Audio Capture
+* **Audio Sources:** Record clear external microphone audio or internal system audio (Android 10+).
 * **Custom Quality:** Configure sample rates and audio bitrates for crystal-clear sound.
 
 ### 🖌️ Live Annotations & Brush Tools
@@ -106,8 +106,7 @@ d:\ScreenX
 │   │
 │   ├── ui/
 │   │   ├── screens/
-│   │   │   ├── HomeScreen.kt        # Home UI with video list & main controls
-│   │   │   └── SettingsScreen.kt    # Recording and styling preferences UI
+│   │   │   └── HomeScreen.kt        # Home UI with video list & settings controls
 │   │   └── theme/
 │   │       ├── Color.kt             # Material 3 theme colors
 │   │       ├── Theme.kt             # Application theme initialization
@@ -140,6 +139,13 @@ d:\ScreenX
    ./gradlew assembleDebug
    ```
 4. Run the app on a connected physical device or emulator.
+
+---
+
+## 🗺️ Upcoming Roadmap
+
+Here are some of the key features and enhancements planned for future releases of ScreenX:
+* **Simultaneous Audio Recording (Mic + System):** Add support to record both microphone (external) and device (internal) audio concurrently with real-time hardware-level synchronization and advanced gain mixing.
 
 ---
 

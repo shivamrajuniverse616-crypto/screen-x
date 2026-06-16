@@ -27,7 +27,6 @@ import androidx.core.content.ContextCompat
 import com.gxdevs.screenx.data.SettingsManager
 import com.gxdevs.screenx.service.ScreenRecordService
 import com.gxdevs.screenx.ui.screens.HomeScreen
-import com.gxdevs.screenx.ui.screens.SettingsScreen
 import com.gxdevs.screenx.ui.screens.GalleryScreen
 import com.gxdevs.screenx.ui.screens.VideoTrimmerScreen
 import com.gxdevs.screenx.ui.theme.ScreenXTheme
@@ -56,6 +55,12 @@ class MainActivity : ComponentActivity() {
     // State holders
     private val recordedVideos = mutableStateListOf<RecordedVideo>()
     private var isRecordingActive by mutableStateOf(false)
+
+    private val recordingSavedReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            refreshVideos()
+        }
+    }
 
     // Capture Launcher
     private val captureLauncher = registerForActivityResult(
@@ -97,11 +102,43 @@ class MainActivity : ComponentActivity() {
         settingsManager = SettingsManager(this)
         projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
+        val filter = android.content.IntentFilter("com.gxdevs.screenx.action.RECORDING_SAVED")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(recordingSavedReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(recordingSavedReceiver, filter)
+        }
+
         setContent {
-            val adaptiveTheme by settingsManager.adaptiveThemeFlow.collectAsState(initial = false)
-            ScreenXTheme(dynamicColor = adaptiveTheme) {
+            val themeMode by settingsManager.themeModeFlow.collectAsState(initial = "system")
+            val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+            val (darkTheme, dynamicColor) = remember(themeMode, isSystemDark) {
+                when (themeMode) {
+                    "dark" -> Pair(true, false)
+                    "light" -> Pair(false, false)
+                    "dynamic" -> Pair(isSystemDark, true)
+                    else -> Pair(isSystemDark, false)
+                }
+            }
+            ScreenXTheme(darkTheme = darkTheme, dynamicColor = dynamicColor) {
                 var currentScreen by remember { mutableStateOf(ScreenState.HOME) }
                 var selectedVideoForTrimming by remember { mutableStateOf<RecordedVideo?>(null) }
+                
+                androidx.activity.compose.BackHandler(enabled = currentScreen != ScreenState.HOME) {
+                    when (currentScreen) {
+                        ScreenState.GALLERY -> {
+                            currentScreen = ScreenState.HOME
+                        }
+                        ScreenState.TRIMMER -> {
+                            currentScreen = if (selectedVideoForTrimming == null) {
+                                ScreenState.HOME
+                            } else {
+                                ScreenState.GALLERY
+                            }
+                        }
+                        ScreenState.HOME -> {}
+                    }
+                }
                 
                 // Track service state locally
                 LaunchedEffect(Unit) {
@@ -350,5 +387,14 @@ class MainActivity : ComponentActivity() {
             action = ScreenRecordService.ACTION_SCREENSHOT
         }
         startService(serviceIntent)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            unregisterReceiver(recordingSavedReceiver)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }

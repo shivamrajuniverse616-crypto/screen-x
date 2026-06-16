@@ -15,7 +15,7 @@ val OnSecondaryContainerLight = Color(0xFF00201E)
 
 val BackgroundLight = Color(0xFFE4DDD3)
 val OnBackgroundLight = Color(0xFF2C2825)
-val SurfaceLight = Color(0xFFFAF8F5)
+val SurfaceLight = Color(0xFFFFFFFF)
 val OnSurfaceLight = Color(0xFF2C2825)
 
 // Dark Scheme (Charcoal background + Teal accents)

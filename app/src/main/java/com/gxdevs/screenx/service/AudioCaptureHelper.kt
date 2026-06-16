@@ -15,6 +15,9 @@ import android.media.projection.MediaProjection
 import android.os.Build
 import java.io.File
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 class AudioCaptureHelper(
@@ -31,6 +34,11 @@ class AudioCaptureHelper(
     @Volatile
     private var isRecording = false
     private var recordingThread: Thread? = null
+    private var systemReaderThread: Thread? = null
+    private var micReaderThread: Thread? = null
+
+    private val systemFifo = ShortArrayFifo()
+    private val micFifo = ShortArrayFifo()
 
     private val sampleRate = 44100
     private val channelConfig = AudioFormat.CHANNEL_IN_STEREO
@@ -103,54 +111,146 @@ class AudioCaptureHelper(
             return
         }
 
+        // Clear FIFOs
+        systemFifo.clear()
+        micFifo.clear()
+
+        // Start reader threads
+        val recordBufferSize = bufferSize
+        if (systemAudioRecord != null) {
+            systemReaderThread = thread(start = true, name = "SystemAudioReader") {
+                try {
+                    systemAudioRecord?.startRecording()
+                    val tempBuf = ShortArray(recordBufferSize / 2)
+                    while (isRecording) {
+                        val read = systemAudioRecord?.read(tempBuf, 0, tempBuf.size) ?: -1
+                        if (read > 0) {
+                            systemFifo.write(tempBuf, read)
+                        } else if (read == 0) {
+                            Thread.sleep(10)
+                        } else {
+                            break
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        if (micAudioRecord != null) {
+            micReaderThread = thread(start = true, name = "MicAudioReader") {
+                try {
+                    micAudioRecord?.startRecording()
+                    val tempBuf = ShortArray(recordBufferSize / 2)
+                    while (isRecording) {
+                        val read = micAudioRecord?.read(tempBuf, 0, tempBuf.size) ?: -1
+                        if (read > 0) {
+                            micFifo.write(tempBuf, read)
+                        } else if (read == 0) {
+                            Thread.sleep(10)
+                        } else {
+                            break
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
         // Start capture/encode loop on background thread
         recordingThread = thread(start = true, name = "AudioRecordThread") {
-            runCaptureLoop(bufferSize)
+            runCaptureLoop()
         }
     }
 
-    private fun runCaptureLoop(bufferSize: Int) {
-        systemAudioRecord?.startRecording()
-        micAudioRecord?.startRecording()
-
-        val systemBuffer = ShortArray(bufferSize / 2)
-        val micBuffer = ShortArray(bufferSize / 2)
-        val mixedBuffer = ShortArray(bufferSize / 2)
-
+    private fun runCaptureLoop() {
         val bufferInfo = MediaCodec.BufferInfo()
         var audioTrackIndex = -1
         var muxerStarted = false
         val presentationStartTimeNs = System.nanoTime()
 
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        var volumeRatio = 1f
+        var loopCount = 0
+
+        val systemBuf = ShortArray(1024)
+        val micBuf = ShortArray(1024)
+        val mixedBuffer = ShortArray(1024)
+
+        var lastSystemReadTime = 0L
+        var lastMicReadTime = 0L
+
         while (isRecording) {
-            var systemBytesRead = 0
-            var micBytesRead = 0
+            val now = System.currentTimeMillis()
 
-            // Read from System Audio Record
-            systemAudioRecord?.let {
-                systemBytesRead = it.read(systemBuffer, 0, systemBuffer.size)
+            // Update volume ratio every ~100ms (approx. 10 loops)
+            if (loopCount % 10 == 0) {
+                try {
+                    val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+                    val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                    volumeRatio = if (maxVolume > 0) currentVolume.toFloat() / maxVolume.toFloat() else 1f
+                } catch (e: Exception) {
+                    volumeRatio = 1f
+                }
+            }
+            loopCount++
+
+            val systemEnabled = systemAudioRecord != null
+            val micEnabled = micAudioRecord != null
+
+            val systemSize = systemFifo.size()
+            val micSize = micFifo.size()
+
+            var hasChunk = false
+
+            if (systemEnabled && micEnabled) {
+                val micIsActive = (now - lastMicReadTime) < 30 || micSize >= 1024
+                val systemIsActive = (now - lastSystemReadTime) < 30 || systemSize >= 1024
+
+                if (systemSize >= 1024 && micSize >= 1024) {
+                    systemFifo.read(systemBuf, 1024)
+                    micFifo.read(micBuf, 1024)
+                    lastSystemReadTime = now
+                    lastMicReadTime = now
+                    hasChunk = true
+                } else if (systemSize >= 1024 && !micIsActive) {
+                    systemFifo.read(systemBuf, 1024)
+                    micBuf.fill(0)
+                    lastSystemReadTime = now
+                    hasChunk = true
+                } else if (micSize >= 1024 && !systemIsActive) {
+                    systemBuf.fill(0)
+                    micFifo.read(micBuf, 1024)
+                    lastMicReadTime = now
+                    hasChunk = true
+                }
+            } else if (systemEnabled) {
+                if (systemSize >= 1024) {
+                    systemFifo.read(systemBuf, 1024)
+                    micBuf.fill(0)
+                    lastSystemReadTime = now
+                    hasChunk = true
+                }
+            } else if (micEnabled) {
+                if (micSize >= 1024) {
+                    systemBuf.fill(0)
+                    micFifo.read(micBuf, 1024)
+                    lastMicReadTime = now
+                    hasChunk = true
+                }
             }
 
-            // Read from Mic Audio Record
-            micAudioRecord?.let {
-                micBytesRead = it.read(micBuffer, 0, micBuffer.size)
-            }
-
-            val maxSamples = maxOf(
-                if (systemBytesRead > 0) systemBytesRead else 0,
-                if (micBytesRead > 0) micBytesRead else 0
-            )
-
-            if (maxSamples <= 0) {
-                if (!isRecording) break
-                Thread.sleep(10)
+            if (!hasChunk) {
+                Thread.sleep(5)
                 continue
             }
 
-            // Mix System and Mic Audio (add and clamp)
-            for (i in 0 until maxSamples) {
-                val systemSample = if (systemBytesRead > 0 && i < systemBytesRead) systemBuffer[i].toInt() else 0
-                val micSample = if (micBytesRead > 0 && i < micBytesRead) micBuffer[i].toInt() else 0
+            // Mix systemBuf and micBuf
+            for (i in 0 until 1024) {
+                val systemSample = (systemBuf[i] * volumeRatio).toInt()
+                val micSample = micBuf[i].toInt()
                 var mixed = systemSample + micSample
                 if (mixed > Short.MAX_VALUE) mixed = Short.MAX_VALUE.toInt()
                 if (mixed < Short.MIN_VALUE) mixed = Short.MIN_VALUE.toInt()
@@ -164,19 +264,16 @@ class AudioCaptureHelper(
                 val inputBuffer = codec.getInputBuffer(inputBufferIndex) ?: continue
                 inputBuffer.clear()
                 
-                // Convert ShortArray to ByteBuffer
-                val byteBuffer = ByteBuffer.allocate(maxSamples * 2)
-                for (i in 0 until maxSamples) {
-                    byteBuffer.putShort(mixedBuffer[i])
-                }
-                byteBuffer.flip()
-                inputBuffer.put(byteBuffer)
+                // Write shorts directly into the codec's input buffer using native byte order
+                inputBuffer.order(ByteOrder.nativeOrder())
+                val shortBuffer = inputBuffer.asShortBuffer()
+                shortBuffer.put(mixedBuffer, 0, 1024)
 
                 val presentationTimeUs = (System.nanoTime() - presentationStartTimeNs) / 1000
                 codec.queueInputBuffer(
                     inputBufferIndex,
                     0,
-                    maxSamples * 2,
+                    1024 * 2,
                     presentationTimeUs,
                     0
                 )
@@ -253,10 +350,85 @@ class AudioCaptureHelper(
         if (!isRecording) return
         isRecording = false
         try {
-            recordingThread?.join(1000)
+            systemAudioRecord?.stop()
+            systemAudioRecord?.release()
+        } catch (e: Exception) {}
+        try {
+            micAudioRecord?.stop()
+            micAudioRecord?.release()
+        } catch (e: Exception) {}
+
+        try {
+            systemReaderThread?.join(100)
         } catch (e: Exception) {
             e.printStackTrace()
         }
+        try {
+            micReaderThread?.join(100)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        try {
+            recordingThread?.join(500)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        systemReaderThread = null
+        micReaderThread = null
         recordingThread = null
+    }
+}
+
+private class ShortArrayFifo {
+    private var buffer = ShortArray(1024 * 16)
+    private var head = 0
+    private var tail = 0
+    private var size = 0
+
+    @Synchronized
+    fun write(data: ShortArray, length: Int) {
+        ensureCapacity(size + length)
+        for (i in 0 until length) {
+            buffer[tail] = data[i]
+            tail = (tail + 1) % buffer.size
+        }
+        size += length
+    }
+
+    @Synchronized
+    fun read(out: ShortArray, length: Int): Int {
+        val toRead = minOf(length, size)
+        for (i in 0 until toRead) {
+            out[i] = buffer[head]
+            head = (head + 1) % buffer.size
+        }
+        size -= toRead
+        return toRead
+    }
+
+    @Synchronized
+    fun size(): Int = size
+
+    @Synchronized
+    fun clear() {
+        head = 0
+        tail = 0
+        size = 0
+    }
+
+    private fun ensureCapacity(requiredCapacity: Int) {
+        if (requiredCapacity > buffer.size) {
+            var newCapacity = buffer.size * 2
+            while (newCapacity < requiredCapacity) {
+                newCapacity *= 2
+            }
+            val newBuffer = ShortArray(newCapacity)
+            for (i in 0 until size) {
+                newBuffer[i] = buffer[(head + i) % buffer.size]
+            }
+            buffer = newBuffer
+            head = 0
+            tail = size
+        }
     }
 }

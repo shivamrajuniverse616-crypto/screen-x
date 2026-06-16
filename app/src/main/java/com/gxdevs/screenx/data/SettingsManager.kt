@@ -20,6 +20,7 @@ class SettingsManager(private val context: Context) {
         val KEY_HIDE_DURING_RECORD = booleanPreferencesKey("hide_during_record")
         val KEY_SAVE_LOCATION = stringPreferencesKey("save_location")
         val KEY_ADAPTIVE_THEME = booleanPreferencesKey("adaptive_theme")
+        val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_SHAKE_TO_STOP = booleanPreferencesKey("shake_to_stop")
         val KEY_ORIENTATION = stringPreferencesKey("orientation")
         val KEY_FLOATING_SHOW_MODE = stringPreferencesKey("floating_show_mode")
@@ -58,9 +59,11 @@ class SettingsManager(private val context: Context) {
         preferences[KEY_SAVE_LOCATION] ?: "Movies/ScreenX"
     }
 
-    val adaptiveThemeFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        preferences[KEY_ADAPTIVE_THEME] ?: false
+    val themeModeFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_THEME_MODE] ?: "system"
     }
+
+    val adaptiveThemeFlow: Flow<Boolean> = themeModeFlow.map { it == "dynamic" }
 
     val shakeToStopFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[KEY_SHAKE_TO_STOP] ?: false
@@ -126,10 +129,14 @@ class SettingsManager(private val context: Context) {
         }
     }
 
-    suspend fun setAdaptiveTheme(adaptive: Boolean) {
+    suspend fun setThemeMode(mode: String) {
         context.dataStore.edit { preferences ->
-            preferences[KEY_ADAPTIVE_THEME] = adaptive
+            preferences[KEY_THEME_MODE] = mode
         }
+    }
+
+    suspend fun setAdaptiveTheme(adaptive: Boolean) {
+        setThemeMode(if (adaptive) "dynamic" else "system")
     }
 
     suspend fun setShakeToStop(shake: Boolean) {

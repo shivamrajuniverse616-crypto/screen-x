@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -61,6 +62,9 @@ import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.Video
 import com.composables.icons.lucide.Volume2
 import com.composables.icons.lucide.X
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -94,6 +98,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import com.gxdevs.screenx.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -210,7 +216,7 @@ fun HomeScreen(
     val countdown by settingsManager.countdownFlow.collectAsState(initial = 3)
     val showFloating by settingsManager.showFloatingFlow.collectAsState(initial = true)
     val hideDuringRecord by settingsManager.hideDuringRecordFlow.collectAsState(initial = false)
-    val adaptiveTheme by settingsManager.adaptiveThemeFlow.collectAsState(initial = false)
+    val themeMode by settingsManager.themeModeFlow.collectAsState(initial = "system")
     val shakeToStop by settingsManager.shakeToStopFlow.collectAsState(initial = false)
     val orientation by settingsManager.orientationFlow.collectAsState(initial = "Auto")
     val floatingShowMode by settingsManager.floatingShowModeFlow.collectAsState(initial = "Only when recording")
@@ -222,9 +228,10 @@ fun HomeScreen(
     var showAudioDialog by remember { mutableStateOf(false) }
     var showCountdownDialog by remember { mutableStateOf(false) }
     var showFloatingShowModeDialog by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
 
     // Check internal audio status
-    val isInternalAudioEnabled = audioSource == "System" || audioSource == "MicSystem"
+    val isInternalAudioSelected = audioSource == "System"
 
     // Configuration / Orientation detection
     val configuration = LocalConfiguration.current
@@ -308,19 +315,9 @@ fun HomeScreen(
 
                         // Toggle 2: Audio Source
                         StatusToggleItem(
-                            icon = when (audioSource) {
-                                "Mic" -> Lucide.Mic
-                                "System" -> Lucide.Volume2
-                                "MicSystem" -> Lucide.Ear
-                                else -> Lucide.MicOff
-                            },
-                            label = when (audioSource) {
-                                "Mic" -> "Microphone"
-                                "System" -> "Device Audio"
-                                "MicSystem" -> "Mic + Device"
-                                else -> "Muted"
-                            },
-                            isActive = audioSource != "None",
+                            icon = if (audioSource == "System") Lucide.Volume2 else Lucide.Mic,
+                            label = if (audioSource == "System") "Device Audio" else "Microphone",
+                            isActive = true,
                             onClick = { showAudioDialog = true }
                         )
 
@@ -362,10 +359,9 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Lucide.Camera,
+                        Image(
+                            painter = painterResource(id = R.drawable.logo_no_bg),
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(24.dp)
                         )
                         Text(
@@ -392,8 +388,8 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    val internalAudioBg = if (isInternalAudioEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
-                    val internalAudioText = if (isInternalAudioEnabled) Color.White else MaterialTheme.colorScheme.onSurface
+                    val internalAudioBg = if (isInternalAudioSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+                    val internalAudioText = if (isInternalAudioSelected) Color.White else MaterialTheme.colorScheme.onSurface
                     
                     Surface(
                         shape = RoundedCornerShape(16.dp),
@@ -403,13 +399,7 @@ fun HomeScreen(
                             .height(40.dp)
                             .bouncyClickable {
                                 coroutineScope.launch {
-                                    val nextSource = when (audioSource) {
-                                        "Mic" -> "MicSystem"
-                                        "MicSystem" -> "Mic"
-                                        "System" -> "None"
-                                        "None" -> "System"
-                                        else -> "Mic"
-                                    }
+                                    val nextSource = if (audioSource == "Mic") "System" else "Mic"
                                     settingsManager.setAudioSource(nextSource)
                                 }
                             }
@@ -522,10 +512,9 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Icon(
-                        imageVector = Lucide.Camera,
+                    Image(
+                        painter = painterResource(id = R.drawable.logo_no_bg),
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(32.dp)
                     )
                     Text(
@@ -733,12 +722,7 @@ fun HomeScreen(
                                         .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f))
                                 ) {
                                     Icon(
-                                        imageVector = when (audioSource) {
-                                            "Mic" -> Lucide.Mic
-                                            "System" -> Lucide.Volume2
-                                            "MicSystem" -> Lucide.Ear
-                                            else -> Lucide.MicOff
-                                        },
+                                        imageVector = if (audioSource == "System") Lucide.Volume2 else Lucide.Mic,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(16.dp)
@@ -747,12 +731,7 @@ fun HomeScreen(
                                 
                                 Column {
                                     Text(
-                                        text = when (audioSource) {
-                                            "Mic" -> "Microphone"
-                                            "System" -> "Device Audio"
-                                            "MicSystem" -> "Device + Mic"
-                                            else -> "Muted"
-                                        },
+                                        text = if (audioSource == "System") "Internal Audio" else "Microphone Only",
                                         color = MaterialTheme.colorScheme.onSurface,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
@@ -970,13 +949,13 @@ fun HomeScreen(
                 Card(
                     shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF1B1B1D)
+                        containerColor = MaterialTheme.colorScheme.surface
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(80.dp)
                         .bouncyClickable {
-                            Toast.makeText(context, "Trim feature coming soon!", Toast.LENGTH_SHORT).show()
+                            onTrimVideoClick()
                         }
                 ) {
                     Row(
@@ -994,7 +973,7 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .size(48.dp)
                                     .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.1f))
+                                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f))
                             ) {
                                 Icon(
                                     imageVector = Lucide.Scissors,
@@ -1007,14 +986,14 @@ fun HomeScreen(
                             Column {
                                 Text(
                                     text = "Trim Video",
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = "Edit your recent captures",
-                                    color = Color.Gray,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp
                                 )
                             }
@@ -1025,12 +1004,12 @@ fun HomeScreen(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.15f))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
                         ) {
                             Icon(
                                 imageVector = Lucide.ChevronRight,
                                 contentDescription = null,
-                                tint = Color.White,
+                                tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -1134,28 +1113,15 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column {
-                            val isAudioOn = audioSource != "None"
                             BottomSheetMenuItem(
-                                title = "Record Audio",
-                                value = if (isAudioOn) "On" else "Off",
-                                onClick = {
-                                    coroutineScope.launch {
-                                        settingsManager.setAudioSource(if (isAudioOn) "None" else "Mic")
-                                    }
-                                }
-                            )
-                            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
-                            BottomSheetMenuItem(
-                                title = "Audio Source",
-                                value = when (audioSource) {
-                                    "None" -> "Mute"
-                                    "Mic" -> "Microphone"
-                                    "System" -> "Internal"
-                                    "MicSystem" -> "Internal + Mic"
-                                    else -> audioSource
-                                },
-                                onClick = { showAudioDialog = true }
-                            )
+                                        title = "Audio Source",
+                                        value = when (audioSource) {
+                                            "Mic" -> "Microphone Only"
+                                            "System" -> "Internal Audio Only"
+                                            else -> "Microphone Only"
+                                        },
+                                        onClick = { showAudioDialog = true }
+                                    )
                             HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
                             BottomSheetMenuItem(
                                 title = "Save Location",
@@ -1182,14 +1148,7 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column {
-                            BottomSheetMenuItem(
-                                title = "Hide Record Window",
-                                value = if (hideDuringRecord) "On" else "Off",
-                                onClick = {
-                                    coroutineScope.launch { settingsManager.setHideDuringRecord(!hideDuringRecord) }
-                                }
-                            )
-                            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 1.dp, modifier = Modifier.padding(horizontal = 16.dp))
+
                             BottomSheetMenuItem(
                                 title = "Shake to Stop",
                                 value = if (shakeToStop) "On" else "Off",
@@ -1231,12 +1190,17 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.surface,
                         modifier = Modifier.fillMaxWidth()
                     ) {
+                        val themeSummary = when (themeMode) {
+                            "dark" -> "Dark Mode"
+                            "light" -> "Light Mode"
+                            "system" -> "System Default"
+                            "dynamic" -> "Dynamic Wallpaper"
+                            else -> "System Default"
+                        }
                         BottomSheetMenuItem(
-                            title = "Adaptive Theme (Wallpaper)",
-                            value = if (adaptiveTheme) "On" else "Off",
-                            onClick = {
-                                coroutineScope.launch { settingsManager.setAdaptiveTheme(!adaptiveTheme) }
-                            }
+                            title = "App Theme",
+                            value = themeSummary,
+                            onClick = { showThemeDialog = true }
                         )
                     }
                 }
@@ -1244,6 +1208,26 @@ fun HomeScreen(
                 item { Spacer(modifier = Modifier.height(24.dp)) }
             }
         }
+    }
+
+    if (showThemeDialog) {
+        val mapping = mapOf(
+            "light" to "Light Mode",
+            "dark" to "Dark Mode",
+            "system" to "System Default",
+            "dynamic" to "Dynamic Wallpaper"
+        )
+        OptionSelectionDialog(
+            title = "Select App Theme",
+            options = mapping.values.toList(),
+            selectedOption = mapping[themeMode] ?: "System Default",
+            onDismiss = { showThemeDialog = false },
+            onSelect = { displayName ->
+                val key = mapping.entries.firstOrNull { it.value == displayName }?.key ?: "system"
+                coroutineScope.launch { settingsManager.setThemeMode(key) }
+                showThemeDialog = false
+            }
+        )
     }
 
     // Dialog sheets inside Bottom Sheet
@@ -1290,9 +1274,9 @@ fun HomeScreen(
     }
 
     if (showAudioDialog) {
-        val mapping = mapOf("None" to "Mute", "Mic" to "Microphone", "System" to "Internal", "MicSystem" to "Internal + Mic")
+        val mapping = mapOf("Mic" to "Microphone Only", "System" to "Internal Audio Only")
         val options = mapping.values.toList()
-        val selectedOption = mapping[audioSource] ?: "Microphone"
+        val selectedOption = mapping[audioSource] ?: "Microphone Only"
         OptionSelectionDialog(
             title = "Select Audio Source",
             options = options,
@@ -1596,6 +1580,7 @@ fun BottomSheetMenuItem(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VideoPlayerDialog(
     videoUri: Uri,
@@ -1618,82 +1603,53 @@ fun VideoPlayerDialog(
         }
     }
 
-    Dialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            dismissOnBackPress = true,
-            dismissOnClickOutside = true,
-            usePlatformDefaultWidth = false
-        )
-    ) {
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = Color.Black,
-            modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .height(460.dp)
-                .padding(16.dp)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
+        title = {
+            Text(
+                text = videoName,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        text = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.Black)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                ) {
-                    AndroidView(
-                        factory = { ctx ->
-                            PlayerView(ctx).apply {
-                                player = exoPlayer
-                                useController = true
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(12.dp)
-                            .background(Color(0x66000000), CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Lucide.X,
-                            contentDescription = "Close player",
-                            tint = Color.White
-                        )
-                    }
-                }
-                
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Lucide.Film,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        videoName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            player = exoPlayer
+                            useController = true
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
             }
-        }
-    }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text(
+                    "Close",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
 }
 
 @Composable
@@ -1823,5 +1779,122 @@ fun RecentThumbnailItem(
             }
         }
     }
+}
+
+@Composable
+fun OptionSelectionDialog(
+    title: String,
+    options: List<String>,
+    selectedOption: String,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                letterSpacing = (-0.5).sp
+            )
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                options.forEach { option ->
+                    val isSelected = option == selectedOption
+                    val backgroundColor by animateColorAsState(
+                        targetValue = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                        } else {
+                            Color.Transparent
+                        },
+                        label = "bgColor"
+                    )
+                    val contentColor by animateColorAsState(
+                        targetValue = if (isSelected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        label = "contentColor"
+                    )
+
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(option) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = backgroundColor
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                                .fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(3.dp)
+                                    .height(16.dp)
+                                    .background(
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                        shape = RoundedCornerShape(1.5.dp)
+                                    )
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                option,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = contentColor
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.primary,
+                                                shape = CircleShape
+                                            )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text(
+                    "Cancel",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
+    )
 }
 

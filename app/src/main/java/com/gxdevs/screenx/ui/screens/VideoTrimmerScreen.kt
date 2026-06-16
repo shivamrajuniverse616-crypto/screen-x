@@ -1,5 +1,6 @@
 package com.gxdevs.screenx.ui.screens
 
+import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -17,7 +18,9 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -43,14 +46,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as GeoSize
-import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +72,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.composables.icons.lucide.Film
 import com.gxdevs.screenx.utils.RecordedVideo
 import com.gxdevs.screenx.utils.VideoHelper
 import com.gxdevs.screenx.utils.VideoTrimmer
@@ -79,6 +89,15 @@ enum class EditMode { TRIM, DELETE, SPLIT }
 
 // ─── Screen root ─────────────────────────────────────────────────────────────
 
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is android.content.ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VideoTrimmerScreen(
@@ -89,10 +108,30 @@ fun VideoTrimmerScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    
+    val view = androidx.compose.ui.platform.LocalView.current
+    val colorScheme = MaterialTheme.colorScheme
+    val isDarkTheme = !((colorScheme.background.red * 0.299f + colorScheme.background.green * 0.587f + colorScheme.background.blue * 0.114f) > 0.5f)
+    val activity = remember(context) { context.findActivity() }
+    val window = activity?.window
 
     var selectedUri by remember { mutableStateOf<Uri?>(initialVideo?.uri) }
     var videoName by remember { mutableStateOf(initialVideo?.name ?: "") }
     var videoDurationMs by remember { mutableStateOf(initialVideo?.duration ?: 0L) }
+
+    val handleBackPress = {
+        if (selectedUri != null && initialVideo == null) {
+            selectedUri = null
+        } else {
+            onBackClick()
+        }
+    }
+
+    androidx.activity.compose.BackHandler(enabled = true) {
+        handleBackPress()
+    }
+
+
 
     val systemVideoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -110,6 +149,7 @@ fun VideoTrimmerScreen(
     if (selectedUri == null) {
         // ── Video picker ──────────────────────────────────────────────────────
         Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 TopAppBar(
                     title = { Text("Select Video to Edit", fontWeight = FontWeight.Bold) },
@@ -117,7 +157,12 @@ fun VideoTrimmerScreen(
                         IconButton(onClick = onBackClick) {
                             Icon(Lucide.ArrowLeft, "Back")
                         }
-                    }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onBackground
+                    )
                 )
             }
         ) { padding ->
@@ -187,11 +232,20 @@ fun VideoTrimmerScreen(
             videoUri = selectedUri!!,
             videoName = videoName,
             videoDurationMs = videoDurationMs,
-            onBackClick = { selectedUri = null },
+            onBackClick = handleBackPress,
             onTrimSuccess = onTrimSuccess
         )
     }
 }
+
+// ─── Video Segment Model ──────────────────────────────────────────────────────
+
+data class VideoSegment(
+    val id: String,
+    val startMs: Long,
+    val endMs: Long,
+    val isDeleted: Boolean = false
+)
 
 // ─── Editor ──────────────────────────────────────────────────────────────────
 
@@ -209,26 +263,45 @@ fun TrimmerEditor(
     val density = LocalDensity.current
 
     // ── State ─────────────────────────────────────────────────────────────────
-    var editMode by remember { mutableStateOf(EditMode.TRIM) }
+    var segments by remember(videoUri) {
+        mutableStateOf(
+            listOf(
+                VideoSegment(
+                    id = java.util.UUID.randomUUID().toString(),
+                    startMs = 0L,
+                    endMs = videoDurationMs
+                )
+            )
+        )
+    }
+    var selectedSegmentId by remember { mutableStateOf<String?>(null) }
 
-    // Selection range [0..1]
-    var startFrac by remember { mutableStateOf(0f) }
-    var endFrac   by remember { mutableStateOf(1f) }
-    // Playhead fraction
+    // Playhead fraction [0..1]
     var playFrac  by remember { mutableStateOf(0f) }
 
     // True while the user's finger is dragging on the timeline
-    // Prevents the position-tracking loop from fighting the drag writes
     var isDragging by remember { mutableStateOf(false) }
+    var isSeeking by remember { mutableStateOf(false) }
+    var seekTimestamp by remember { mutableStateOf(0L) }
+    var draggedSegmentId by remember { mutableStateOf<String?>(null) }
 
     var currentPosMs by remember { mutableStateOf(0L) }
     var isProcessing by remember { mutableStateOf(false) }
     var processingProgress by remember { mutableStateOf(0f) }
     var processingLabel by remember { mutableStateOf("") }
 
-    val startMs = (startFrac * videoDurationMs).toLong()
-    val endMs   = (endFrac   * videoDurationMs).toLong()
-    val splitMs = (playFrac  * videoDurationMs).toLong()
+    var showExitConfirmation by remember { mutableStateOf(false) }
+    val handleExit = {
+        val hasChanges = segments.size > 1 || (segments.firstOrNull()?.let { it.startMs > 0L || it.endMs < videoDurationMs } ?: false)
+        if (hasChanges) {
+            showExitConfirmation = true
+        } else {
+            onBackClick()
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = !isProcessing) {
+        handleExit()
+    }
 
     // ── ExoPlayer ────────────────────────────────────────────────────────────
     val exoPlayer = remember(videoUri) {
@@ -247,34 +320,61 @@ fun TrimmerEditor(
         })
     }
 
-    // Seek to start of selection on mode/range change
-    LaunchedEffect(editMode, startMs) {
-        if (editMode == EditMode.TRIM) exoPlayer.seekTo(startMs)
-    }
-
-    // Position tracking + loop-within-selection
-    // Skips playFrac update while isDragging to prevent jitter
-    LaunchedEffect(exoPlayer, editMode, startMs, endMs) {
+    // Position tracking + skipping deleted segments in preview
+    LaunchedEffect(exoPlayer, segments) {
         while (true) {
             delay(33)
             val pos = exoPlayer.currentPosition
-            currentPosMs = pos
-            // Only sync playFrac from player when not dragging
-            if (!isDragging) {
+            
+            if (!isDragging && !isSeeking) {
+                currentPosMs = pos
                 playFrac = if (videoDurationMs > 0)
                     (pos.toFloat() / videoDurationMs).coerceIn(0f, 1f) else 0f
+            } else if (isSeeking) {
+                if (abs(pos - currentPosMs) < 150L || System.currentTimeMillis() - seekTimestamp > 1000L) {
+                    isSeeking = false
+                }
             }
 
-            if (exoPlayer.isPlaying) {
-                when (editMode) {
-                    EditMode.TRIM -> {
-                        if (pos >= endMs) exoPlayer.seekTo(startMs)
-                        else if (pos < startMs) exoPlayer.seekTo(startMs)
+            val state = exoPlayer.playbackState
+            if (state == Player.STATE_ENDED && !isSeeking) {
+                val firstActive = segments.firstOrNull { !it.isDeleted }
+                val targetMs = firstActive?.startMs ?: 0L
+                isSeeking = true
+                seekTimestamp = System.currentTimeMillis()
+                exoPlayer.seekTo(targetMs)
+                if (!isDragging) {
+                    currentPosMs = targetMs
+                    playFrac = if (videoDurationMs > 0) (targetMs.toFloat() / videoDurationMs).coerceIn(0f, 1f) else 0f
+                }
+                exoPlayer.pause()
+            }
+
+            if (exoPlayer.isPlaying && !isSeeking) {
+                val currentSegment = segments.firstOrNull { pos in it.startMs until it.endMs }
+                if (currentSegment != null && currentSegment.isDeleted) {
+                    val nextActive = segments.firstOrNull { it.startMs >= currentSegment.endMs && !it.isDeleted }
+                    if (nextActive != null) {
+                        isSeeking = true
+                        seekTimestamp = System.currentTimeMillis()
+                        exoPlayer.seekTo(nextActive.startMs)
+                    } else {
+                        val firstActive = segments.firstOrNull { !it.isDeleted }
+                        if (firstActive != null) {
+                            isSeeking = true
+                            seekTimestamp = System.currentTimeMillis()
+                            exoPlayer.seekTo(firstActive.startMs)
+                        } else {
+                            exoPlayer.pause()
+                        }
                     }
-                    EditMode.DELETE -> {
-                        if (pos in startMs until endMs) exoPlayer.seekTo(endMs)
+                } else if (pos >= videoDurationMs) {
+                    val firstActive = segments.firstOrNull { !it.isDeleted }
+                    if (firstActive != null) {
+                        isSeeking = true
+                        seekTimestamp = System.currentTimeMillis()
+                        exoPlayer.seekTo(firstActive.startMs)
                     }
-                    EditMode.SPLIT -> { /* free play */ }
                 }
             }
         }
@@ -282,12 +382,56 @@ fun TrimmerEditor(
 
     DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
 
+    // Helper functions for editing
+    fun splitAtPlayhead() {
+        val splitMs = (playFrac * videoDurationMs).toLong()
+        val targetSeg = segments.firstOrNull { splitMs in (it.startMs + 300L)..(it.endMs - 300L) }
+        if (targetSeg != null) {
+            val idx = segments.indexOf(targetSeg)
+            val seg1 = VideoSegment(
+                id = java.util.UUID.randomUUID().toString(),
+                startMs = targetSeg.startMs,
+                endMs = splitMs,
+                isDeleted = targetSeg.isDeleted
+            )
+            val seg2 = VideoSegment(
+                id = java.util.UUID.randomUUID().toString(),
+                startMs = splitMs,
+                endMs = targetSeg.endMs,
+                isDeleted = targetSeg.isDeleted
+            )
+            val mutable = segments.toMutableList()
+            mutable.removeAt(idx)
+            mutable.add(idx, seg2)
+            mutable.add(idx, seg1)
+            segments = mutable
+            selectedSegmentId = seg2.id
+            Toast.makeText(context, "Video split at ${formatTime(splitMs)}", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Cannot split too close to segment boundaries", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun toggleDeleteSelected() {
+        val activeId = selectedSegmentId ?: segments.firstOrNull { currentPosMs in it.startMs until it.endMs }?.id
+        if (activeId != null) {
+            segments = segments.map {
+                if (it.id == activeId) {
+                    it.copy(isDeleted = !it.isDeleted)
+                } else {
+                    it
+                }
+            }
+        } else {
+            Toast.makeText(context, "Please select a segment first", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // ── Thumbnails ────────────────────────────────────────────────────────────
     val thumbnailCount = 12
     var thumbnails by remember(videoUri) { mutableStateOf<List<Bitmap?>>(List(thumbnailCount) { null }) }
     LaunchedEffect(videoUri, videoDurationMs) {
         if (videoDurationMs <= 0) return@LaunchedEffect
-        // Recycle previous bitmaps before loading new ones to prevent OOM
         val old = thumbnails
         thumbnails = withContext(Dispatchers.IO) {
             old.forEach { it?.recycle() }
@@ -295,37 +439,26 @@ fun TrimmerEditor(
         }
     }
 
-    // ── Timeline layout width (pixels → fraction) ─────────────────────────────
     var timelineWidthPx by remember { mutableStateOf(0f) }
 
     // ── Scaffold ──────────────────────────────────────────────────────────────
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Text(
-                        when (editMode) {
-                            EditMode.TRIM   -> "Trim Video"
-                            EditMode.DELETE -> "Delete Segment"
-                            EditMode.SPLIT  -> "Split Video"
-                        },
-                        fontWeight = FontWeight.Bold
-                    )
-                },
+                title = { Text("Edit Video", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    // Disabled while processing to prevent nav into invalid state
-                    IconButton(onClick = onBackClick, enabled = !isProcessing) {
+                    IconButton(onClick = handleExit, enabled = !isProcessing) {
                         Icon(Lucide.ArrowLeft, "Back")
                     }
                 },
                 actions = {
-                    // Save / Execute button
                     Button(
                         onClick = {
-                            when (editMode) {
-                                EditMode.TRIM   -> executeTrim(context, coroutineScope, videoUri, videoName, startMs, endMs, { isProcessing = it }, { processingProgress = it }, { processingLabel = it }, onTrimSuccess)
-                                EditMode.DELETE -> executeDelete(context, coroutineScope, videoUri, videoName, videoDurationMs, startMs, endMs, { isProcessing = it }, { processingProgress = it }, { processingLabel = it }, onTrimSuccess)
-                                EditMode.SPLIT  -> executeSplit(context, coroutineScope, videoUri, videoName, videoDurationMs, splitMs, { isProcessing = it }, { processingProgress = it }, { processingLabel = it }, onTrimSuccess)
+                            val activeSegments = segments.filter { !it.isDeleted }.map { Pair(it.startMs, it.endMs) }
+                            if (activeSegments.isEmpty()) {
+                                Toast.makeText(context, "Cannot save with all segments deleted", Toast.LENGTH_SHORT).show()
+                            } else {
+                                executeExport(context, coroutineScope, videoUri, videoName, activeSegments, { isProcessing = it }, { processingProgress = it }, { processingLabel = it }, onTrimSuccess)
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
@@ -333,21 +466,17 @@ fun TrimmerEditor(
                     ) {
                         Icon(Lucide.Save, null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text(
-                            when (editMode) {
-                                EditMode.TRIM   -> "Save Trim"
-                                EditMode.DELETE -> "Save Delete"
-                                EditMode.SPLIT  -> "Split & Save"
-                            }
-                        )
+                        Text("Save Video")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0D0D0F)
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
         },
-        containerColor = Color(0xFF0D0D0F)
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
 
         Column(
@@ -355,7 +484,7 @@ fun TrimmerEditor(
                 .fillMaxSize()
                 .padding(padding)
                 .navigationBarsPadding()
-                .background(Color(0xFF0D0D0F)),
+                .background(MaterialTheme.colorScheme.background),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
@@ -363,7 +492,7 @@ fun TrimmerEditor(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1.4f)
+                    .weight(1.3f)
                     .padding(horizontal = 12.dp, vertical = 8.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(Color.Black)
@@ -392,7 +521,6 @@ fun TrimmerEditor(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Timestamp
                     Text(
                         formatTime(currentPosMs),
                         color = Color.White.copy(alpha = 0.8f),
@@ -435,383 +563,404 @@ fun TrimmerEditor(
                 }
             }
 
-            // ── Mode selector tabs ────────────────────────────────────────
-            Row(
+            // ── Segment list horizontal view ─────────────────────────────
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .background(Color(0xFF1A1A1F), RoundedCornerShape(14.dp))
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(vertical = 8.dp)
             ) {
-                EditMode.entries.forEach { mode ->
-                    val selected = editMode == mode
-                    Box(
+                items(segments) { seg ->
+                    val isSelected = seg.id == (selectedSegmentId ?: segments.firstOrNull { currentPosMs in it.startMs until it.endMs }?.id)
+                    val isDeleted = seg.isDeleted
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = when {
+                            isSelected && isDeleted -> Color(0xFFEF5350).copy(alpha = 0.3f)
+                            isSelected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                            isDeleted -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
+                            else -> MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        border = if (isSelected) BorderStroke(2.dp, if (isDeleted) Color(0xFFEF5350) else MaterialTheme.colorScheme.primary) else null,
                         modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(
-                                if (selected) MaterialTheme.colorScheme.primary
-                                else Color.Transparent
-                            )
-                            .clickable { editMode = mode }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
+                            .clickable {
+                                selectedSegmentId = seg.id
+                                exoPlayer.seekTo(seg.startMs)
+                            }
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = when (mode) {
-                                    EditMode.TRIM   -> Lucide.Crop
-                                    EditMode.DELETE -> Lucide.Eraser
-                                    EditMode.SPLIT  -> Lucide.Scissors
-                                },
+                                imageVector = if (isDeleted) Lucide.Eraser else Lucide.Film,
                                 contentDescription = null,
-                                tint = if (selected) Color.White else Color.Gray,
-                                modifier = Modifier.size(14.dp)
+                                tint = if (isDeleted) Color(0xFFEF5350) else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(Modifier.width(4.dp))
+                            Spacer(Modifier.width(6.dp))
                             Text(
-                                text = when (mode) {
-                                    EditMode.TRIM   -> "Trim"
-                                    EditMode.DELETE -> "Delete"
-                                    EditMode.SPLIT  -> "Split"
+                                text = "${formatTime(seg.startMs)} - ${formatTime(seg.endMs)}",
+                                color = if (isDeleted) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
                                 },
-                                color = if (selected) Color.White else Color.Gray,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
                             )
+                            if (isDeleted) {
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = "DELETED",
+                                    color = Color(0xFFEF5350),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
-
             // ── Timeline ──────────────────────────────────────────────────
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1F)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
 
-                    // Info row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        when (editMode) {
-                            EditMode.TRIM -> {
-                                InfoChip("In", formatTime(startMs), MaterialTheme.colorScheme.primary)
-                                InfoChip("Duration", formatTime(endMs - startMs), Color(0xFF4FC3F7))
-                                InfoChip("Out", formatTime(endMs), MaterialTheme.colorScheme.secondary)
-                            }
-                            EditMode.DELETE -> {
-                                InfoChip("Del Start", formatTime(startMs), Color(0xFFEF5350))
-                                InfoChip("Removed", formatTime(endMs - startMs), Color(0xFFFF8A65))
-                                InfoChip("Del End", formatTime(endMs), Color(0xFFEF5350))
-                            }
-                            EditMode.SPLIT -> {
-                                InfoChip("Part A", formatTime(splitMs), MaterialTheme.colorScheme.primary)
-                                InfoChip("Split At", formatTime(splitMs), Color(0xFFFFD54F))
-                                InfoChip("Part B", formatTime(videoDurationMs - splitMs), MaterialTheme.colorScheme.secondary)
+                        // Segment Status info
+                        val activeId = selectedSegmentId ?: segments.firstOrNull { currentPosMs in it.startMs until it.endMs }?.id
+                        val activeSeg = segments.firstOrNull { it.id == activeId }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            if (activeSeg != null) {
+                                InfoChip("Selected Start", formatTime(activeSeg.startMs), MaterialTheme.colorScheme.primary)
+                                InfoChip("Selected Duration", formatTime(activeSeg.endMs - activeSeg.startMs), Color(0xFF4FC3F7))
+                                InfoChip("Selected End", formatTime(activeSeg.endMs), MaterialTheme.colorScheme.secondary)
+                            } else {
+                                InfoChip("Start", "00:00.0", Color.Gray)
+                                InfoChip("Duration", formatTime(videoDurationMs), Color.Gray)
+                                InfoChip("End", formatTime(videoDurationMs), Color.Gray)
                             }
                         }
-                    }
 
-                    Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(12.dp))
 
-                    // ── Frame strip + handles ─────────────────────────────
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(64.dp)
-                            .onGloballyPositioned { coords ->
-                                timelineWidthPx = coords.size.width.toFloat()
-                            }
-                    ) {
-                        // Frame thumbnails
-                        Row(
+                        // ── Frame strip + handles ─────────────────────────────
+                        Box(
                             modifier = Modifier
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(8.dp))
+                                .fillMaxWidth()
+                                .height(64.dp)
+                                .onGloballyPositioned { coords ->
+                                    timelineWidthPx = coords.size.width.toFloat()
+                                }
                         ) {
-                            thumbnails.forEach { bmp ->
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .background(Color(0xFF2C2C2E))
-                                ) {
-                                    if (bmp != null) {
-                                        Image(
-                                            bitmap = bmp.asImageBitmap(),
-                                            contentDescription = null,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
+                            // Frame thumbnails
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(8.dp))
+                            ) {
+                                thumbnails.forEach { bmp ->
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .background(Color(0xFF2C2C2E))
+                                    ) {
+                                        if (bmp != null) {
+                                            Image(
+                                                bitmap = bmp.asImageBitmap(),
+                                                contentDescription = null,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        // Dimmed overlay outside selection
-                        if (editMode == EditMode.TRIM || editMode == EditMode.DELETE) {
-                            val dimLeft  = editMode == EditMode.TRIM
-                            val dimRight = editMode == EditMode.TRIM
-                            val dimMid   = editMode == EditMode.DELETE
+                            val currentActiveIdForHighlight = selectedSegmentId ?: segments.firstOrNull { currentPosMs in it.startMs until it.endMs }?.id
+                            val currentActiveSegForHighlight = segments.firstOrNull { it.id == currentActiveIdForHighlight }
+                            val highlightColor = if (currentActiveSegForHighlight?.isDeleted == true) Color(0xFFEF5350) else MaterialTheme.colorScheme.primary
 
+                            // Dimmed overlay for deleted segments & split vertical lines
                             Canvas(modifier = Modifier.fillMaxSize()) {
                                 val W = size.width
                                 val H = size.height
-                                val sX = startFrac * W
-                                val eX = endFrac * W
+                                
+                                segments.forEach { seg ->
+                                    val sX = (seg.startMs.toFloat() / videoDurationMs) * W
+                                    val eX = (seg.endMs.toFloat() / videoDurationMs) * W
+                                    
+                                    // Dim deleted segments
+                                    if (seg.isDeleted) {
+                                        drawRect(
+                                            color = Color(0xAAEF5350),
+                                            topLeft = Offset(sX, 0f),
+                                            size = GeoSize(eX - sX, H)
+                                        )
+                                    }
 
-                                if (dimLeft && sX > 0) {
-                                    drawRect(
-                                        color = Color(0xAA000000),
-                                        topLeft = Offset(0f, 0f),
-                                        size = GeoSize(sX, H)
-                                    )
+                                    // Draw split boundaries
+                                    if (seg.startMs > 0L) {
+                                        drawLine(
+                                            color = Color.Black.copy(alpha = 0.8f),
+                                            start = Offset(sX, 0f),
+                                            end = Offset(sX, H),
+                                            strokeWidth = 4f
+                                        )
+                                    }
                                 }
-                                if (dimRight && eX < W) {
+
+                                // Selected segment border highlight
+                                if (currentActiveSegForHighlight != null) {
+                                    val sX = (currentActiveSegForHighlight.startMs.toFloat() / videoDurationMs) * W
+                                    val eX = (currentActiveSegForHighlight.endMs.toFloat() / videoDurationMs) * W
                                     drawRect(
-                                        color = Color(0xAA000000),
-                                        topLeft = Offset(eX, 0f),
-                                        size = GeoSize(W - eX, H)
-                                    )
-                                }
-                                if (dimMid) {
-                                    drawRect(
-                                        color = Color(0x88EF5350),
+                                        color = highlightColor,
                                         topLeft = Offset(sX, 0f),
-                                        size = GeoSize(eX - sX, H)
+                                        size = GeoSize(eX - sX, H),
+                                        style = Stroke(width = 4f)
                                     )
                                 }
                             }
+
+                            // Render handles for the selected/active segment
+                            val currentActiveIdForHandles = draggedSegmentId ?: selectedSegmentId ?: segments.firstOrNull { currentPosMs in it.startMs until it.endMs }?.id
+                            val currentActiveSegForHandles = segments.firstOrNull { it.id == currentActiveIdForHandles }
+                            if (currentActiveSegForHandles != null) {
+                                val hColor = if (currentActiveSegForHandles.isDeleted) Color(0xFFEF5350) else MaterialTheme.colorScheme.primary
+                                val startFracOfSeg = currentActiveSegForHandles.startMs.toFloat() / videoDurationMs
+                                val endFracOfSeg = currentActiveSegForHandles.endMs.toFloat() / videoDurationMs
+                                
+                                val halfHandleWidthPx = with(density) { 14.dp.toPx() }
+                                val maxOffsetPx = (timelineWidthPx - with(density) { 28.dp.toPx() }).coerceAtLeast(0f)
+                                
+                                // Left handle
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .offset(x = with(density) { (startFracOfSeg * timelineWidthPx - halfHandleWidthPx).coerceIn(0f, maxOffsetPx).toDp() })
+                                        .width(28.dp)
+                                        .fillMaxHeight()
+                                        .background(hColor.copy(alpha = 0.9f), RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("◁", color = Color.White, fontSize = 14.sp)
+                                }
+                                // Right handle
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .offset(x = with(density) { (endFracOfSeg * timelineWidthPx - halfHandleWidthPx).coerceIn(0f, maxOffsetPx).toDp() })
+                                        .width(28.dp)
+                                        .fillMaxHeight()
+                                        .background(hColor.copy(alpha = 0.9f), RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("▷", color = Color.White, fontSize = 14.sp)
+                                }
+                            }
+
+                            // Playhead line
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val x = playFrac * size.width
+                                drawLine(
+                                    color = Color.White,
+                                    start = Offset(x, 0f),
+                                    end = Offset(x, size.height),
+                                    strokeWidth = 3f
+                                )
+                                drawCircle(color = Color.White, radius = 6f, center = Offset(x, 0f))
+                            }
+
+                            val handleTouchPx = with(density) { 36.dp.toPx() }
+                            // 0 = scrub, 1 = start handle, 2 = end handle
+                            var dragTarget by remember { mutableStateOf(0) }
+
+                            // Drag / Tap target
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(videoUri) {
+                                        detectDragGestures(
+                                            onDragStart = { offset ->
+                                                if (timelineWidthPx <= 0f) return@detectDragGestures
+                                                exoPlayer.pause()
+                                                isDragging = true
+                                                val currentActiveId = selectedSegmentId ?: segments.firstOrNull { currentPosMs in it.startMs until it.endMs }?.id
+                                                draggedSegmentId = currentActiveId
+                                                val currentActiveSeg = segments.firstOrNull { it.id == currentActiveId }
+                                                if (currentActiveSeg != null) {
+                                                    val sX = (currentActiveSeg.startMs.toFloat() / videoDurationMs) * timelineWidthPx
+                                                    val eX = (currentActiveSeg.endMs.toFloat() / videoDurationMs) * timelineWidthPx
+                                                    val distStart = abs(offset.x - sX)
+                                                    val distEnd = abs(offset.x - eX)
+                                                    dragTarget = if (distStart <= handleTouchPx || distEnd <= handleTouchPx) {
+                                                        if (distStart < distEnd) 1 else 2
+                                                    } else {
+                                                        0
+                                                    }
+                                                } else {
+                                                    dragTarget = 0
+                                                }
+                                            },
+                                            onDragEnd = { 
+                                                isDragging = false 
+                                                isSeeking = true
+                                                seekTimestamp = System.currentTimeMillis()
+                                                draggedSegmentId = null
+                                            },
+                                            onDragCancel = { 
+                                                isDragging = false 
+                                                isSeeking = true
+                                                seekTimestamp = System.currentTimeMillis()
+                                                draggedSegmentId = null
+                                            },
+                                            onDrag = { change, _ ->
+                                                if (timelineWidthPx <= 0f) return@detectDragGestures
+                                                val x = change.position.x.coerceIn(0f, timelineWidthPx)
+                                                val frac = x / timelineWidthPx
+                                                val newMs = (frac * videoDurationMs).toLong()
+                                                
+                                                val currentActiveId = draggedSegmentId ?: selectedSegmentId ?: segments.firstOrNull { currentPosMs in it.startMs until it.endMs }?.id
+                                                val targetSegIdx = segments.indexOfFirst { it.id == currentActiveId }
+                                                
+                                                if (targetSegIdx != -1 && (dragTarget == 1 || dragTarget == 2)) {
+                                                    val targetSeg = segments[targetSegIdx]
+                                                    val updatedList = segments.toMutableList()
+                                                    if (dragTarget == 1) {
+                                                        val minVal = if (targetSegIdx > 0) segments[targetSegIdx - 1].startMs + 300L else 0L
+                                                        val maxVal = targetSeg.endMs - 300L
+                                                        val finalStartMs = newMs.coerceIn(minVal.coerceAtMost(maxVal), maxVal)
+                                                        updatedList[targetSegIdx] = targetSeg.copy(startMs = finalStartMs)
+                                                        if (targetSegIdx > 0) {
+                                                            updatedList[targetSegIdx - 1] = updatedList[targetSegIdx - 1].copy(endMs = finalStartMs)
+                                                        }
+                                                        exoPlayer.seekTo(finalStartMs)
+                                                        playFrac = (finalStartMs.toFloat() / videoDurationMs).coerceIn(0f, 1f)
+                                                        currentPosMs = finalStartMs
+                                                    } else {
+                                                        val minVal = targetSeg.startMs + 300L
+                                                        val maxVal = if (targetSegIdx < segments.size - 1) segments[targetSegIdx + 1].endMs - 300L else videoDurationMs
+                                                        val finalEndMs = newMs.coerceIn(minVal.coerceAtMost(maxVal), maxVal)
+                                                        updatedList[targetSegIdx] = targetSeg.copy(endMs = finalEndMs)
+                                                        if (targetSegIdx < segments.size - 1) {
+                                                            updatedList[targetSegIdx + 1] = updatedList[targetSegIdx + 1].copy(startMs = finalEndMs)
+                                                        }
+                                                        exoPlayer.seekTo(finalEndMs)
+                                                        playFrac = (finalEndMs.toFloat() / videoDurationMs).coerceIn(0f, 1f)
+                                                        currentPosMs = finalEndMs
+                                                    }
+                                                    segments = updatedList
+                                                } else {
+                                                    playFrac = frac.coerceIn(0f, 1f)
+                                                    currentPosMs = newMs
+                                                    exoPlayer.seekTo(newMs)
+                                                }
+                                                change.consume()
+                                            }
+                                        )
+                                    }
+                                    .pointerInput(videoUri) {
+                                        detectTapGestures { offset ->
+                                            if (timelineWidthPx <= 0f) return@detectTapGestures
+                                            val frac = (offset.x / timelineWidthPx).coerceIn(0f, 1f)
+                                            val clickMs = (frac * videoDurationMs).toLong()
+                                            val clickedSeg = segments.firstOrNull { clickMs in it.startMs until it.endMs }
+                                            if (clickedSeg != null) {
+                                                selectedSegmentId = clickedSeg.id
+                                            }
+                                            isSeeking = true
+                                            seekTimestamp = System.currentTimeMillis()
+                                            playFrac = frac
+                                            currentPosMs = clickMs
+                                            exoPlayer.seekTo(clickMs)
+                                        }
+                                    }
+                            )
                         }
 
-                        // Selection border
-                        if (editMode != EditMode.SPLIT) {
-                            val borderColor = when (editMode) {
-                                EditMode.DELETE -> Color(0xFFEF5350)
-                                else -> MaterialTheme.colorScheme.primary
-                            }
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                val W = size.width
-                                val H = size.height
-                                val sX = startFrac * W
-                                val eX = endFrac * W
-                                drawRect(
-                                    color = borderColor,
-                                    topLeft = Offset(sX, 0f),
-                                    size = GeoSize(eX - sX, H),
-                                    style = Stroke(width = 3f)
+                        Spacer(Modifier.height(8.dp))
+
+                        // Time ruler ticks
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { f ->
+                                Text(
+                                    formatTimeShort((f * videoDurationMs).toLong()),
+                                    color = Color.Gray,
+                                    fontSize = 9.sp
                                 )
                             }
                         }
 
-                        // Playhead / split line
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            val x = playFrac * size.width
-                            val color = if (editMode == EditMode.SPLIT) Color(0xFFFFD54F) else Color.White
-                            drawLine(
-                                color = color,
-                                start = Offset(x, 0f),
-                                end = Offset(x, size.height),
-                                strokeWidth = 3f
-                            )
-                            drawCircle(color = color, radius = 6f, center = Offset(x, 0f))
-                        }
+                        Spacer(Modifier.height(12.dp))
 
-                        // Drag target — latches which handle was grabbed at touch-down
-                        // to prevent handles jumping around during a slow drag
-                        val handleTouchPx = with(density) { 36.dp.toPx() }
-                        // 0 = scrub, 1 = start handle, 2 = end handle
-                        var dragTarget by remember { mutableStateOf(0) }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(editMode, timelineWidthPx, videoDurationMs) {
-                                    detectDragGestures(
-                                        onDragStart = { offset ->
-                                            if (timelineWidthPx <= 0f) return@detectDragGestures
-                                            isDragging = true
-                                            val sX = startFrac * timelineWidthPx
-                                            val eX = endFrac   * timelineWidthPx
-                                            dragTarget = when {
-                                                editMode == EditMode.SPLIT -> 0
-                                                abs(offset.x - sX) <= handleTouchPx -> 1
-                                                abs(offset.x - eX) <= handleTouchPx -> 2
-                                                else -> 0
-                                            }
-                                        },
-                                        onDragEnd   = { isDragging = false },
-                                        onDragCancel = { isDragging = false },
-                                        onDrag = { change, _ ->
-                                            if (timelineWidthPx <= 0f) return@detectDragGestures
-                                            val x = change.position.x.coerceIn(0f, timelineWidthPx)
-                                            val frac = x / timelineWidthPx
-
-                                            when {
-                                                dragTarget == 1 -> { // start handle
-                                                    startFrac = frac.coerceIn(0f, endFrac - 0.01f)
-                                                    exoPlayer.seekTo((startFrac * videoDurationMs).toLong())
-                                                }
-                                                dragTarget == 2 -> { // end handle
-                                                    endFrac = frac.coerceIn(startFrac + 0.01f, 1f)
-                                                    exoPlayer.seekTo((endFrac * videoDurationMs).toLong())
-                                                }
-                                                else -> { // scrub / split
-                                                    playFrac = frac.coerceIn(0f, 1f)
-                                                    exoPlayer.seekTo((frac * videoDurationMs).toLong())
-                                                }
-                                            }
-                                            change.consume()
-                                        }
-                                    )
-                                }
-                                .pointerInput(editMode, timelineWidthPx, videoDurationMs) {
-                                    detectTapGestures { offset ->
-                                        if (timelineWidthPx <= 0f) return@detectTapGestures
-                                        val frac = (offset.x / timelineWidthPx).coerceIn(0f, 1f)
-                                        playFrac = frac
-                                        exoPlayer.seekTo((frac * videoDurationMs).toLong())
-                                    }
-                                }
-                        )
-
-                        // Handle visuals
-                        if (editMode == EditMode.TRIM || editMode == EditMode.DELETE) {
-                            val hColor = if (editMode == EditMode.DELETE) Color(0xFFEF5350) else MaterialTheme.colorScheme.primary
-                            // Left handle
-                            Box(
-                                modifier = Modifier
-                                    .offset(x = with(density) { (startFrac * timelineWidthPx - 14f).coerceAtLeast(0f).toDp() })
-                                    .width(28.dp)
-                                    .fillMaxHeight()
-                                    .background(hColor.copy(alpha = 0.9f), RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("◁", color = Color.White, fontSize = 14.sp)
-                            }
-                            // Right handle
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .offset(x = with(density) { (endFrac * timelineWidthPx - 14f).coerceIn(0f, (timelineWidthPx - 28f).coerceAtLeast(0f)).toDp() })
-                                    .width(28.dp)
-                                    .fillMaxHeight()
-                                    .background(hColor.copy(alpha = 0.9f), RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("▷", color = Color.White, fontSize = 14.sp)
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // Time ruler tick marks
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { f ->
+                        // ── Fine adjustment controls ───────────────────────────
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text(
-                                formatTimeShort((f * videoDurationMs).toLong()),
-                                color = Color.Gray,
-                                fontSize = 9.sp
+                                "Tap timeline to select parts, then split or delete/restore them",
+                                color = Color.Gray, fontSize = 11.sp,
+                                textAlign = TextAlign.Center
                             )
-                        }
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-
-                    // ── Fine adjustment controls ───────────────────────────
-                    when (editMode) {
-                        EditMode.TRIM, EditMode.DELETE -> {
-                            val label1 = if (editMode == EditMode.TRIM) "In Point" else "Del Start"
-                            val label2 = if (editMode == EditMode.TRIM) "Out Point" else "Del End"
-                            val accent  = if (editMode == EditMode.DELETE) Color(0xFFEF5350) else MaterialTheme.colorScheme.primary
+                            Spacer(Modifier.height(12.dp))
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                FineAdjustColumn(
-                                    label = label1,
-                                    value = formatTime(startMs),
-                                    accent = accent,
+                                Button(
+                                    onClick = { splitAtPlayhead() },
                                     modifier = Modifier.weight(1f),
-                                    // Guard: videoDurationMs==0 would divide by zero
-                                    onMinus = { if (videoDurationMs > 0) startFrac = (startFrac - 100f / videoDurationMs).coerceIn(0f, endFrac - 0.001f) },
-                                    onPlus  = { if (videoDurationMs > 0) startFrac = (startFrac + 100f / videoDurationMs).coerceIn(0f, endFrac - 0.001f) }
-                                )
-                                FineAdjustColumn(
-                                    label = label2,
-                                    value = formatTime(endMs),
-                                    accent = accent,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Lucide.Scissors, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Split here", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+
+                                val isSelectedDeleted = segments.firstOrNull { it.id == activeId }?.isDeleted == true
+                                Button(
+                                    onClick = { toggleDeleteSelected() },
                                     modifier = Modifier.weight(1f),
-                                    onMinus = { if (videoDurationMs > 0) endFrac = (endFrac - 100f / videoDurationMs).coerceIn(startFrac + 0.001f, 1f) },
-                                    onPlus  = { if (videoDurationMs > 0) endFrac = (endFrac + 100f / videoDurationMs).coerceIn(startFrac + 0.001f, 1f) }
-                                )
-                            }
-                        }
-                        EditMode.SPLIT -> {
-                            // Quick split position controls
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    "Drag timeline or use fine controls to set split point",
-                                    color = Color.Gray, fontSize = 11.sp,
-                                    textAlign = TextAlign.Center
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                FineAdjustColumn(
-                                    label = "Split Point",
-                                    value = formatTime(splitMs),
-                                    accent = Color(0xFFFFD54F),
-                                    modifier = Modifier.fillMaxWidth(0.6f),
-                                    onMinus = {
-                                        val newMs = (splitMs - 100L).coerceAtLeast(0L)
-                                        playFrac = newMs.toFloat() / videoDurationMs
-                                        exoPlayer.seekTo(newMs)
-                                    },
-                                    onPlus = {
-                                        val newMs = (splitMs + 100L).coerceAtMost(videoDurationMs)
-                                        playFrac = newMs.toFloat() / videoDurationMs
-                                        exoPlayer.seekTo(newMs)
-                                    }
-                                )
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isSelectedDeleted) Color(0xFF4CAF50) else Color(0xFFEF5350)
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isSelectedDeleted) Lucide.RotateCcw else Lucide.Eraser,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = if (isSelectedDeleted) "Restore part" else "Delete part",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                }
                             }
                         }
                     }
-
-                    Spacer(Modifier.height(4.dp))
-
-                    // Help text
-                    Text(
-                        text = when (editMode) {
-                            EditMode.TRIM   -> "Drag handles or tap timeline to set In/Out points. Only the selected region is saved."
-                            EditMode.DELETE -> "Drag handles to mark the segment to remove. Both sides are joined together."
-                            EditMode.SPLIT  -> "Set the split point. Two separate video files will be saved."
-                        },
-                        color = Color.Gray,
-                        fontSize = 10.sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp)
-                    )
                 }
             }
 
@@ -821,19 +970,21 @@ fun TrimmerEditor(
 
     // ── Processing overlay ────────────────────────────────────────────────────
     if (isProcessing) {
-        Dialog(
+        AlertDialog(
             onDismissRequest = {},
-            properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
-        ) {
-            Card(
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1F)),
-                modifier = Modifier.fillMaxWidth(0.85f)
-            ) {
+            title = {
+                Text(
+                    text = processingLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
                 Column(
-                    modifier = Modifier.padding(28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     CircularProgressIndicator(
                         color = MaterialTheme.colorScheme.primary,
@@ -841,8 +992,6 @@ fun TrimmerEditor(
                         strokeWidth = 4.dp
                     )
                     Spacer(Modifier.height(20.dp))
-                    Text(processingLabel, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color.White)
-                    Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(
                         progress = { processingProgress },
                         color = MaterialTheme.colorScheme.primary,
@@ -863,6 +1012,106 @@ fun TrimmerEditor(
                         textAlign = TextAlign.Center
                     )
                 }
+            },
+            confirmButton = {},
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    if (showExitConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showExitConfirmation = false },
+            title = {
+                Text(
+                    text = "Discard changes?",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    letterSpacing = (-0.5).sp
+                )
+            },
+            text = {
+                Text(
+                    text = "You have unsaved edits. Are you sure you want to discard them and exit?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showExitConfirmation = false
+                        onBackClick()
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = Color(0xFFEF5350)
+                    )
+                ) {
+                    Text(
+                        "Discard",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showExitConfirmation = false },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text(
+                        "Keep Editing",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+}
+
+private fun executeExport(
+    context: Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    sourceUri: Uri,
+    videoName: String,
+    activeSegments: List<Pair<Long, Long>>,
+    setProcessing: (Boolean) -> Unit,
+    setProgress: (Float) -> Unit,
+    setLabel: (String) -> Unit,
+    onSuccess: () -> Unit
+) {
+    setProcessing(true)
+    setLabel("Exporting Video…")
+    val progressCb = makeProgressCallback(scope, setProgress)
+    scope.launch(Dispatchers.IO) {
+        var tempFile: File? = null
+        try {
+            tempFile = File(context.cacheDir, "export_${System.currentTimeMillis()}.mp4")
+            VideoTrimmer.exportSegments(
+                context = context,
+                sourceUri = sourceUri,
+                outputFile = tempFile,
+                segments = activeSegments,
+                progressCallback = progressCb
+            )
+            val totalDurationMs = activeSegments.sumOf { it.second - it.first }
+            saveVideoToMediaStore(context, tempFile, videoName, totalDurationMs)
+            tempFile = null
+            withContext(Dispatchers.Main) {
+                setProcessing(false)
+                Toast.makeText(context, "Video edited & saved successfully!", Toast.LENGTH_SHORT).show()
+                onSuccess()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            tempFile?.delete()
+            withContext(Dispatchers.Main) {
+                setProcessing(false)
+                Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }

@@ -155,6 +155,65 @@ object VideoTrimmer {
         progressCallback(1f)
     }
 
+    /**
+     * Export multiple segments: trims each segment and concatenates them into a single output file.
+     */
+    fun exportSegments(
+        context: Context,
+        sourceUri: Uri,
+        outputFile: File,
+        segments: List<Pair<Long, Long>>,
+        progressCallback: (Float) -> Unit = {}
+    ) {
+        require(segments.isNotEmpty()) { "Segments list cannot be empty" }
+        
+        if (segments.size == 1) {
+            trim(context, sourceUri, outputFile, segments[0].first, segments[0].second, progressCallback)
+            return
+        }
+
+        val ts = System.currentTimeMillis()
+        val tempFiles = segments.mapIndexed { index, _ ->
+            File(outputFile.parent, "seg_${index}_$ts.mp4")
+        }
+
+        try {
+            // Extract all segments
+            segments.forEachIndexed { index, pair ->
+                val startProgress = index.toFloat() / segments.size * 0.8f
+                val endProgress = (index + 1).toFloat() / segments.size * 0.8f
+                extractSegment(
+                    context = context,
+                    sourceUri = sourceUri,
+                    outputFile = tempFiles[index],
+                    segStartUs = pair.first * 1000L,
+                    segEndUs = pair.second * 1000L,
+                    outputOffsetUs = 0L,
+                    progressStart = startProgress,
+                    progressEnd = endProgress,
+                    progressCallback = progressCallback
+                )
+            }
+
+            // Concatenate them one by one
+            var currentOut = tempFiles[0]
+            for (i in 1 until tempFiles.size) {
+                val nextOut = if (i == tempFiles.size - 1) outputFile else File(outputFile.parent, "concat_${i}_$ts.mp4")
+                concatenate(currentOut, tempFiles[i], nextOut) { p ->
+                    val base = 0.8f + (i - 1).toFloat() / (tempFiles.size - 1) * 0.2f
+                    progressCallback(base + p * (0.2f / (tempFiles.size - 1)))
+                }
+                if (currentOut != tempFiles[0]) {
+                    currentOut.delete()
+                }
+                currentOut = nextOut
+            }
+            progressCallback(1f)
+        } finally {
+            tempFiles.forEach { it.takeIf { it.exists() }?.delete() }
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     //  Core extraction
     // ─────────────────────────────────────────────────────────────────────────

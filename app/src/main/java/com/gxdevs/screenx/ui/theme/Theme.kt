@@ -10,6 +10,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -57,24 +58,28 @@ fun ScreenXTheme(
             val context = LocalContext.current
             if (isSystemDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        dynamicColor -> {
-            if (isSystemDark) DarkColorScheme else LightColorScheme
+        else -> {
+            if (darkTheme) DarkColorScheme else LightColorScheme
         }
-        else -> LightColorScheme
     }
     
     val view = LocalView.current
     if (!view.isInEditMode) {
         @Suppress("DEPRECATION")
-        SideEffect {
+        DisposableEffect(colorScheme, isSystemDark, dynamicColor, darkTheme) {
             val window = (view.context as Activity).window
             window.statusBarColor = colorScheme.background.toArgb()
             window.navigationBarColor = colorScheme.background.toArgb()
             
-            val useDarkIcons = if (dynamicColor) !isSystemDark else true
+            val useDarkIcons = if (dynamicColor) {
+                !isSystemDark
+            } else {
+                !darkTheme
+            }
             val insetsController = WindowCompat.getInsetsController(window, view)
             insetsController.isAppearanceLightStatusBars = useDarkIcons
             insetsController.isAppearanceLightNavigationBars = useDarkIcons
+            onDispose {}
         }
     }
 

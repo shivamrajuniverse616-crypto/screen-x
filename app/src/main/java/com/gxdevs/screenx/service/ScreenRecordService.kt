@@ -206,7 +206,7 @@ class ScreenRecordService : LifecycleService() {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("ScreenX Recorder")
             .setContentText(status)
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setSmallIcon(com.gxdevs.screenx.R.mipmap.ic_launcher_monochrome)
             .setContentIntent(pendingMainIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -662,6 +662,7 @@ class ScreenRecordService : LifecycleService() {
                     put(MediaStore.Video.Media.SIZE, tempFile.length())
                 }
                 resolver.update(videoUri, updateValues, null, null)
+                sendBroadcast(Intent("com.gxdevs.screenx.action.RECORDING_SAVED"))
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
