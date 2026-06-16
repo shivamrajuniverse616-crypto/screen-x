@@ -63,27 +63,30 @@ object VideoHelper {
                 sortOrder
             )?.use { cursor ->
                 while (cursor.moveToNext()) {
-                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID))
-                    val name = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME))
-                    val path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA))
-                    val size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE))
+                    val id       = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID))
+                    val name     = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)) ?: continue
+                    // DATA can be null on Android 10+ with scoped storage
+                    val path     = cursor.getString(cursor.getColumnIndex(MediaStore.Video.Media.DATA))
+                    val size     = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE))
                     val duration = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION))
                     val dateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED))
                     val resolution = cursor.getString(cursor.getColumnIndex(MediaStore.Video.Media.RESOLUTION)) ?: "Unknown"
 
                     val contentUri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
 
-                    // Verify file still exists on disk
-                    if (File(path).exists()) {
+                    // On scoped storage (API 29+) path may be null; include by URI.
+                    // On older APIs, verify the file physically exists before listing.
+                    val fileExists = if (path != null) File(path).exists() else true
+                    if (fileExists) {
                         videos.add(
                             RecordedVideo(
-                                id = id,
-                                uri = contentUri,
-                                name = name,
-                                path = path,
-                                size = size,
-                                duration = duration,
-                                dateAdded = dateAdded,
+                                id         = id,
+                                uri        = contentUri,
+                                name       = name,
+                                path       = path ?: "",
+                                size       = size,
+                                duration   = duration,
+                                dateAdded  = dateAdded,
                                 resolution = resolution
                             )
                         )

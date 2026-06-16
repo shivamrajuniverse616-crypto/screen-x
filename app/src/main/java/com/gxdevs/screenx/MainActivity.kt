@@ -166,7 +166,12 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onTrimSuccess = {
                                         refreshVideos()
-                                        currentScreen = ScreenState.GALLERY
+                                        // Return to wherever the user came from
+                                        currentScreen = if (selectedVideoForTrimming == null) {
+                                            ScreenState.HOME
+                                        } else {
+                                            ScreenState.GALLERY
+                                        }
                                     }
                                 )
                             }

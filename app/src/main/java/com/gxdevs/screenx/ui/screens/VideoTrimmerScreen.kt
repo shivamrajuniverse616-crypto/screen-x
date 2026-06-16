@@ -3,17 +3,18 @@ package com.gxdevs.screenx.ui.screens
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,10 +28,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size as GeoSize
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,6 +58,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.abs
+
+// ─── Edit Mode Enum ──────────────────────────────────────────────────────────
+
+enum class EditMode { TRIM, DELETE, SPLIT }
+
+// ─── Screen root ─────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,39 +76,33 @@ fun VideoTrimmerScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    
-    var selectedVideo by remember { mutableStateOf<RecordedVideo?>(initialVideo) }
+
     var selectedUri by remember { mutableStateOf<Uri?>(initialVideo?.uri) }
     var videoName by remember { mutableStateOf(initialVideo?.name ?: "") }
     var videoDurationMs by remember { mutableStateOf(initialVideo?.duration ?: 0L) }
 
-    // External video picker
     val systemVideoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
             selectedUri = uri
-            selectedVideo = null
             videoName = "External_Video_${System.currentTimeMillis()}.mp4"
-            // Query duration if possible
             coroutineScope.launch(Dispatchers.IO) {
-                val duration = queryVideoDuration(context, uri)
-                withContext(Dispatchers.Main) {
-                    videoDurationMs = duration
-                }
+                val dur = queryVideoDuration(context, uri)
+                withContext(Dispatchers.Main) { videoDurationMs = dur }
             }
         }
     }
 
     if (selectedUri == null) {
-        // Media Selection Screen
+        // ── Video picker ──────────────────────────────────────────────────────
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Select Video to Trim", fontWeight = FontWeight.Bold) },
+                    title = { Text("Select Video to Edit", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                         }
                     }
                 )
@@ -108,7 +116,6 @@ fun VideoTrimmerScreen(
                     .navigationBarsPadding()
                     .padding(16.dp)
             ) {
-                // Option to select from phone
                 Card(
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -117,20 +124,18 @@ fun VideoTrimmerScreen(
                         .height(100.dp)
                         .clickable { systemVideoPickerLauncher.launch("video/*") }
                 ) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Default.FolderOpen,
-                                contentDescription = null,
+                                Icons.Default.FolderOpen, null,
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.size(32.dp)
                             )
-                            Spacer(modifier = Modifier.width(16.dp))
+                            Spacer(Modifier.width(16.dp))
                             Column {
                                 Text(
                                     "Choose from Device",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold, fontSize = 18.sp,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                                 Text(
@@ -143,28 +148,18 @@ fun VideoTrimmerScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Text(
-                    "Recent Captures",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(Modifier.height(24.dp))
+                Text("Recent Captures", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Spacer(Modifier.height(8.dp))
 
                 if (videos.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("No recordings available", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(videos) { video ->
                             RecentSelectCard(video = video, onClick = {
-                                selectedVideo = video
                                 selectedUri = video.uri
                                 videoName = video.name
                                 videoDurationMs = video.duration
@@ -175,7 +170,6 @@ fun VideoTrimmerScreen(
             }
         }
     } else {
-        // Trimmer Editor Screen
         TrimmerEditor(
             videoUri = selectedUri!!,
             videoName = videoName,
@@ -185,6 +179,8 @@ fun VideoTrimmerScreen(
         )
     }
 }
+
+// ─── Editor ──────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -197,152 +193,166 @@ fun TrimmerEditor(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
 
-    var startVal by remember { mutableStateOf(0.0f) }
-    var endVal by remember { mutableStateOf(1.0f) }
-    var isTrimming by remember { mutableStateOf(false) }
-    var trimProgress by remember { mutableStateOf(0f) }
-    var isCutMiddleMode by remember { mutableStateOf(false) }
+    // ── State ─────────────────────────────────────────────────────────────────
+    var editMode by remember { mutableStateOf(EditMode.TRIM) }
+
+    // Selection range [0..1]
+    var startFrac by remember { mutableStateOf(0f) }
+    var endFrac   by remember { mutableStateOf(1f) }
+    // Playhead fraction
+    var playFrac  by remember { mutableStateOf(0f) }
+
+    // True while the user's finger is dragging on the timeline
+    // Prevents the position-tracking loop from fighting the drag writes
+    var isDragging by remember { mutableStateOf(false) }
+
     var currentPosMs by remember { mutableStateOf(0L) }
+    var isProcessing by remember { mutableStateOf(false) }
+    var processingProgress by remember { mutableStateOf(0f) }
+    var processingLabel by remember { mutableStateOf("") }
 
-    val startMs = (startVal * videoDurationMs).toLong()
-    val endMs = (endVal * videoDurationMs).toLong()
+    val startMs = (startFrac * videoDurationMs).toLong()
+    val endMs   = (endFrac   * videoDurationMs).toLong()
+    val splitMs = (playFrac  * videoDurationMs).toLong()
 
+    // ── ExoPlayer ────────────────────────────────────────────────────────────
     val exoPlayer = remember(videoUri) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(videoUri))
             prepare()
-            repeatMode = Player.REPEAT_MODE_ONE
+            repeatMode = Player.REPEAT_MODE_OFF
+            playWhenReady = false
         }
     }
 
-    // Update playback constraints based on start/end range
-    LaunchedEffect(startMs, endMs, isCutMiddleMode) {
-        if (!isCutMiddleMode) {
-            exoPlayer.seekTo(startMs)
-        } else {
-            // Seek to loop beginning in cut middle mode
-            exoPlayer.seekTo(0)
-        }
+    var isPlaying by remember { mutableStateOf(false) }
+    LaunchedEffect(exoPlayer) {
+        exoPlayer.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
+        })
     }
 
-    // Periodically monitor playback position and loop within selected range
-    LaunchedEffect(exoPlayer, isCutMiddleMode, startMs, endMs) {
+    // Seek to start of selection on mode/range change
+    LaunchedEffect(editMode, startMs) {
+        if (editMode == EditMode.TRIM) exoPlayer.seekTo(startMs)
+    }
+
+    // Position tracking + loop-within-selection
+    // Skips playFrac update while isDragging to prevent jitter
+    LaunchedEffect(exoPlayer, editMode, startMs, endMs) {
         while (true) {
-            delay(50)
-            currentPosMs = exoPlayer.currentPosition
+            delay(33)
+            val pos = exoPlayer.currentPosition
+            currentPosMs = pos
+            // Only sync playFrac from player when not dragging
+            if (!isDragging) {
+                playFrac = if (videoDurationMs > 0)
+                    (pos.toFloat() / videoDurationMs).coerceIn(0f, 1f) else 0f
+            }
+
             if (exoPlayer.isPlaying) {
-                if (!isCutMiddleMode) {
-                    if (exoPlayer.currentPosition >= endMs || exoPlayer.currentPosition < startMs) {
-                        exoPlayer.seekTo(startMs)
+                when (editMode) {
+                    EditMode.TRIM -> {
+                        if (pos >= endMs) exoPlayer.seekTo(startMs)
+                        else if (pos < startMs) exoPlayer.seekTo(startMs)
                     }
-                } else {
-                    // Loop around the cut (skipping the middle section)
-                    val pos = exoPlayer.currentPosition
-                    if (pos >= startMs && pos < endMs) {
-                        exoPlayer.seekTo(endMs)
+                    EditMode.DELETE -> {
+                        if (pos in startMs until endMs) exoPlayer.seekTo(endMs)
                     }
+                    EditMode.SPLIT -> { /* free play */ }
                 }
             }
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            exoPlayer.release()
+    DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
+
+    // ── Thumbnails ────────────────────────────────────────────────────────────
+    val thumbnailCount = 12
+    var thumbnails by remember(videoUri) { mutableStateOf<List<Bitmap?>>(List(thumbnailCount) { null }) }
+    LaunchedEffect(videoUri, videoDurationMs) {
+        if (videoDurationMs <= 0) return@LaunchedEffect
+        // Recycle previous bitmaps before loading new ones to prevent OOM
+        val old = thumbnails
+        thumbnails = withContext(Dispatchers.IO) {
+            old.forEach { it?.recycle() }
+            loadFrameThumbnails(context, videoUri, videoDurationMs, thumbnailCount)
         }
     }
 
+    // ── Timeline layout width (pixels → fraction) ─────────────────────────────
+    var timelineWidthPx by remember { mutableStateOf(0f) }
+
+    // ── Scaffold ──────────────────────────────────────────────────────────────
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        if (isCutMiddleMode) "Cut Middle" else "Trim Video",
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.5).sp
+                        when (editMode) {
+                            EditMode.TRIM   -> "Trim Video"
+                            EditMode.DELETE -> "Delete Segment"
+                            EditMode.SPLIT  -> "Split Video"
+                        },
+                        fontWeight = FontWeight.Bold
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    // Disabled while processing to prevent nav into invalid state
+                    IconButton(onClick = onBackClick, enabled = !isProcessing) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
                 actions = {
+                    // Save / Execute button
                     Button(
                         onClick = {
-                            if (endMs <= startMs + 1000) {
-                                Toast.makeText(context, "Range must be at least 1 second", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            isTrimming = true
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    val tempFile = File(context.cacheDir, "trimmed_${System.currentTimeMillis()}.mp4")
-                                    if (isCutMiddleMode) {
-                                        VideoTrimmer.cutMiddle(
-                                            context = context,
-                                            sourceUri = videoUri,
-                                            outputFile = tempFile,
-                                            cutStartMs = startMs,
-                                            cutEndMs = endMs,
-                                            progressCallback = { progress ->
-                                                trimProgress = progress
-                                            }
-                                        )
-                                        saveVideoToMediaStore(context, tempFile, videoName, videoDurationMs - (endMs - startMs))
-                                    } else {
-                                        VideoTrimmer.trim(
-                                            context = context,
-                                            sourceUri = videoUri,
-                                            outputFile = tempFile,
-                                            startMs = startMs,
-                                            endMs = endMs,
-                                            progressCallback = { progress ->
-                                                trimProgress = progress
-                                            }
-                                        )
-                                        saveVideoToMediaStore(context, tempFile, videoName, endMs - startMs)
-                                    }
-                                    withContext(Dispatchers.Main) {
-                                        isTrimming = false
-                                        Toast.makeText(context, "Video processed successfully!", Toast.LENGTH_SHORT).show()
-                                        onTrimSuccess()
-                                    }
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                    withContext(Dispatchers.Main) {
-                                        isTrimming = false
-                                        Toast.makeText(context, "Failed to edit video: ${e.message}", Toast.LENGTH_LONG).show()
-                                    }
-                                }
+                            when (editMode) {
+                                EditMode.TRIM   -> executeTrim(context, coroutineScope, videoUri, videoName, startMs, endMs, { isProcessing = it }, { processingProgress = it }, { processingLabel = it }, onTrimSuccess)
+                                EditMode.DELETE -> executeDelete(context, coroutineScope, videoUri, videoName, videoDurationMs, startMs, endMs, { isProcessing = it }, { processingProgress = it }, { processingLabel = it }, onTrimSuccess)
+                                EditMode.SPLIT  -> executeSplit(context, coroutineScope, videoUri, videoName, videoDurationMs, splitMs, { isProcessing = it }, { processingProgress = it }, { processingLabel = it }, onTrimSuccess)
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        enabled = !isProcessing
                     ) {
-                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Save")
+                        Icon(Icons.Default.Save, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            when (editMode) {
+                                EditMode.TRIM   -> "Save Trim"
+                                EditMode.DELETE -> "Save Delete"
+                                EditMode.SPLIT  -> "Split & Save"
+                            }
+                        )
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF0D0D0F)
+                )
             )
-        }
+        },
+        containerColor = Color(0xFF0D0D0F)
     ) { padding ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(Color(0xFF121214)) // Cinematic Dark Background
                 .navigationBarsPadding()
-                .padding(16.dp),
+                .background(Color(0xFF0D0D0F)),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Player viewport
+
+            // ── Video player ──────────────────────────────────────────────
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1.3f)
-                    .clip(RoundedCornerShape(24.dp))
+                    .weight(1.4f)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(20.dp))
                     .background(Color.Black)
             ) {
                 AndroidView(
@@ -355,295 +365,488 @@ fun TrimmerEditor(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Quick Play/Pause Center Overlay
-                var isPlaying by remember { mutableStateOf(false) }
-                LaunchedEffect(exoPlayer) {
-                    isPlaying = exoPlayer.isPlaying
-                    exoPlayer.addListener(object : Player.Listener {
-                        override fun onIsPlayingChanged(playing: Boolean) {
-                            isPlaying = playing
-                        }
-                    })
-                }
-
-                // Controls row at the bottom of the Box
+                // Playback controls overlay
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.5f))
-                        .padding(vertical = 8.dp),
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))
+                            )
+                        )
+                        .padding(bottom = 12.dp, top = 24.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = { exoPlayer.seekTo((exoPlayer.currentPosition - 5000).coerceAtLeast(0)) }
-                    ) {
-                        Icon(imageVector = Icons.Default.Replay5, contentDescription = "-5s", tint = Color.White)
-                    }
-                    
-                    Spacer(modifier = Modifier.width(16.dp))
+                    // Timestamp
+                    Text(
+                        formatTime(currentPosMs),
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(end = 16.dp)
+                    )
 
+                    IconButton(
+                        onClick = { exoPlayer.seekTo((currentPosMs - 5000).coerceAtLeast(0)) }
+                    ) {
+                        Icon(Icons.Default.Replay5, "-5s", tint = Color.White)
+                    }
+                    Spacer(Modifier.width(8.dp))
                     IconButton(
                         onClick = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(52.dp)
                             .background(MaterialTheme.colorScheme.primary, CircleShape)
                     ) {
                         Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            tint = Color.White
+                            if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            "Play/Pause", tint = Color.White,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
-
-                    Spacer(modifier = Modifier.width(16.dp))
-
+                    Spacer(Modifier.width(8.dp))
                     IconButton(
-                        onClick = { exoPlayer.seekTo((exoPlayer.currentPosition + 5000).coerceAtMost(videoDurationMs)) }
+                        onClick = { exoPlayer.seekTo((currentPosMs + 5000).coerceAtMost(videoDurationMs)) }
                     ) {
-                        Icon(imageVector = Icons.Default.Forward5, contentDescription = "+5s", tint = Color.White)
+                        Icon(Icons.Default.Forward5, "+5s", tint = Color.White)
+                    }
+
+                    Text(
+                        formatTime(videoDurationMs),
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(start = 16.dp)
+                    )
+                }
+            }
+
+            // ── Mode selector tabs ────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .background(Color(0xFF1A1A1F), RoundedCornerShape(14.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                EditMode.entries.forEach { mode ->
+                    val selected = editMode == mode
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.primary
+                                else Color.Transparent
+                            )
+                            .clickable { editMode = mode }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = when (mode) {
+                                    EditMode.TRIM   -> Icons.Default.Crop
+                                    EditMode.DELETE -> Icons.Default.DeleteSweep
+                                    EditMode.SPLIT  -> Icons.Default.ContentCut
+                                },
+                                contentDescription = null,
+                                tint = if (selected) Color.White else Color.Gray,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = when (mode) {
+                                    EditMode.TRIM   -> "Trim"
+                                    EditMode.DELETE -> "Delete"
+                                    EditMode.SPLIT  -> "Split"
+                                },
+                                color = if (selected) Color.White else Color.Gray,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
-            // Editor Mode Segmented Switch
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF1B1B1F), RoundedCornerShape(14.dp))
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (!isCutMiddleMode) MaterialTheme.colorScheme.primary else Color.Transparent)
-                        .clickable { isCutMiddleMode = false }
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "Keep Selection",
-                        color = if (!isCutMiddleMode) Color.White else Color.Gray,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isCutMiddleMode) MaterialTheme.colorScheme.primary else Color.Transparent)
-                        .clickable { isCutMiddleMode = true }
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "Delete Selection (Middle)",
-                        color = if (isCutMiddleMode) Color.White else Color.Gray,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Split and Playhead Info Row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Playhead: ${formatTime(currentPosMs)}",
-                    color = Color.LightGray,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Button(
-                    onClick = {
-                        val playheadPct = currentPosMs.toFloat() / videoDurationMs.toFloat()
-                        if (startVal == 0.0f && endVal == 1.0f) {
-                            startVal = playheadPct.coerceIn(0.0f, 1.0f)
-                            isCutMiddleMode = true
-                        } else if (startVal > 0.0f && endVal == 1.0f) {
-                            endVal = playheadPct.coerceIn(startVal + 0.01f, 1.0f)
-                        } else {
-                            if (Math.abs(playheadPct - startVal) < Math.abs(playheadPct - endVal)) {
-                                startVal = playheadPct.coerceIn(0.0f, endVal - 0.01f)
-                            } else {
-                                endVal = playheadPct.coerceIn(startVal + 0.01f, 1.0f)
-                            }
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.height(36.dp)
-                ) {
-                    Icon(Icons.Default.ContentCut, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Split at Playhead", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Range Controls
+            // ── Timeline ──────────────────────────────────────────────────
             Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1B1F)),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1F)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .wrapContentHeight()
+                    .padding(horizontal = 12.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Display timestamps
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+
+                    // Info row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
-                            Text(if (isCutMiddleMode) "Cut Start" else "Start Time", fontSize = 11.sp, color = Color.Gray)
-                            Text(formatTime(startMs), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(if (isCutMiddleMode) "Cut End" else "End Time", fontSize = 11.sp, color = Color.Gray)
-                            Text(formatTime(endMs), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        when (editMode) {
+                            EditMode.TRIM -> {
+                                InfoChip("In", formatTime(startMs), MaterialTheme.colorScheme.primary)
+                                InfoChip("Duration", formatTime(endMs - startMs), Color(0xFF4FC3F7))
+                                InfoChip("Out", formatTime(endMs), MaterialTheme.colorScheme.secondary)
+                            }
+                            EditMode.DELETE -> {
+                                InfoChip("Del Start", formatTime(startMs), Color(0xFFEF5350))
+                                InfoChip("Removed", formatTime(endMs - startMs), Color(0xFFFF8A65))
+                                InfoChip("Del End", formatTime(endMs), Color(0xFFEF5350))
+                            }
+                            EditMode.SPLIT -> {
+                                InfoChip("Part A", formatTime(splitMs), MaterialTheme.colorScheme.primary)
+                                InfoChip("Split At", formatTime(splitMs), Color(0xFFFFD54F))
+                                InfoChip("Part B", formatTime(videoDurationMs - splitMs), MaterialTheme.colorScheme.secondary)
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(Modifier.height(12.dp))
 
-                    Text(
-                        text = if (isCutMiddleMode) {
-                            "Output Duration: ${formatTime(videoDurationMs - (endMs - startMs))}"
-                        } else {
-                            "Trimmed Duration: ${formatTime(endMs - startMs)}"
-                        },
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    // ── Frame strip + handles ─────────────────────────────
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp)
+                            .onGloballyPositioned { coords ->
+                                timelineWidthPx = coords.size.width.toFloat()
+                            }
+                    ) {
+                        // Frame thumbnails
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(8.dp))
+                        ) {
+                            thumbnails.forEach { bmp ->
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .background(Color(0xFF2C2C2E))
+                                ) {
+                                    if (bmp != null) {
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                }
+                            }
+                        }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                        // Dimmed overlay outside selection
+                        if (editMode == EditMode.TRIM || editMode == EditMode.DELETE) {
+                            val dimLeft  = editMode == EditMode.TRIM
+                            val dimRight = editMode == EditMode.TRIM
+                            val dimMid   = editMode == EditMode.DELETE
 
-                    // Range Slider
-                    RangeSlider(
-                        value = startVal..endVal,
-                        onValueChange = { range ->
-                            startVal = range.start
-                            endVal = range.endInclusive
-                        },
-                        valueRange = 0f..1f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = Color.DarkGray
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val W = size.width
+                                val H = size.height
+                                val sX = startFrac * W
+                                val eX = endFrac * W
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                                if (dimLeft && sX > 0) {
+                                    drawRect(
+                                        color = Color(0xAA000000),
+                                        topLeft = Offset(0f, 0f),
+                                        size = GeoSize(sX, H)
+                                    )
+                                }
+                                if (dimRight && eX < W) {
+                                    drawRect(
+                                        color = Color(0xAA000000),
+                                        topLeft = Offset(eX, 0f),
+                                        size = GeoSize(W - eX, H)
+                                    )
+                                }
+                                if (dimMid) {
+                                    drawRect(
+                                        color = Color(0x88EF5350),
+                                        topLeft = Offset(sX, 0f),
+                                        size = GeoSize(eX - sX, H)
+                                    )
+                                }
+                            }
+                        }
 
-                    // Fine Tuning Controls
-                    Text("Fine Tuning Adjustments", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(8.dp))
+                        // Selection border
+                        if (editMode != EditMode.SPLIT) {
+                            val borderColor = when (editMode) {
+                                EditMode.DELETE -> Color(0xFFEF5350)
+                                else -> MaterialTheme.colorScheme.primary
+                            }
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val W = size.width
+                                val H = size.height
+                                val sX = startFrac * W
+                                val eX = endFrac * W
+                                drawRect(
+                                    color = borderColor,
+                                    topLeft = Offset(sX, 0f),
+                                    size = GeoSize(eX - sX, H),
+                                    style = Stroke(width = 3f)
+                                )
+                            }
+                        }
 
+                        // Playhead / split line
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val x = playFrac * size.width
+                            val color = if (editMode == EditMode.SPLIT) Color(0xFFFFD54F) else Color.White
+                            drawLine(
+                                color = color,
+                                start = Offset(x, 0f),
+                                end = Offset(x, size.height),
+                                strokeWidth = 3f
+                            )
+                            drawCircle(color = color, radius = 6f, center = Offset(x, 0f))
+                        }
+
+                        // Drag target — latches which handle was grabbed at touch-down
+                        // to prevent handles jumping around during a slow drag
+                        val handleTouchPx = with(density) { 36.dp.toPx() }
+                        // 0 = scrub, 1 = start handle, 2 = end handle
+                        var dragTarget by remember { mutableStateOf(0) }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(editMode, timelineWidthPx, videoDurationMs) {
+                                    detectDragGestures(
+                                        onDragStart = { offset ->
+                                            if (timelineWidthPx <= 0f) return@detectDragGestures
+                                            isDragging = true
+                                            val sX = startFrac * timelineWidthPx
+                                            val eX = endFrac   * timelineWidthPx
+                                            dragTarget = when {
+                                                editMode == EditMode.SPLIT -> 0
+                                                abs(offset.x - sX) <= handleTouchPx -> 1
+                                                abs(offset.x - eX) <= handleTouchPx -> 2
+                                                else -> 0
+                                            }
+                                        },
+                                        onDragEnd   = { isDragging = false },
+                                        onDragCancel = { isDragging = false },
+                                        onDrag = { change, _ ->
+                                            if (timelineWidthPx <= 0f) return@detectDragGestures
+                                            val x = change.position.x.coerceIn(0f, timelineWidthPx)
+                                            val frac = x / timelineWidthPx
+
+                                            when {
+                                                dragTarget == 1 -> { // start handle
+                                                    startFrac = frac.coerceIn(0f, endFrac - 0.01f)
+                                                    exoPlayer.seekTo((startFrac * videoDurationMs).toLong())
+                                                }
+                                                dragTarget == 2 -> { // end handle
+                                                    endFrac = frac.coerceIn(startFrac + 0.01f, 1f)
+                                                    exoPlayer.seekTo((endFrac * videoDurationMs).toLong())
+                                                }
+                                                else -> { // scrub / split
+                                                    playFrac = frac.coerceIn(0f, 1f)
+                                                    exoPlayer.seekTo((frac * videoDurationMs).toLong())
+                                                }
+                                            }
+                                            change.consume()
+                                        }
+                                    )
+                                }
+                                .pointerInput(editMode, timelineWidthPx, videoDurationMs) {
+                                    detectTapGestures { offset ->
+                                        if (timelineWidthPx <= 0f) return@detectTapGestures
+                                        val frac = (offset.x / timelineWidthPx).coerceIn(0f, 1f)
+                                        playFrac = frac
+                                        exoPlayer.seekTo((frac * videoDurationMs).toLong())
+                                    }
+                                }
+                        )
+
+                        // Handle visuals
+                        if (editMode == EditMode.TRIM || editMode == EditMode.DELETE) {
+                            val hColor = if (editMode == EditMode.DELETE) Color(0xFFEF5350) else MaterialTheme.colorScheme.primary
+                            // Left handle
+                            Box(
+                                modifier = Modifier
+                                    .offset(x = with(density) { (startFrac * timelineWidthPx - 14f).coerceAtLeast(0f).toDp() })
+                                    .width(28.dp)
+                                    .fillMaxHeight()
+                                    .background(hColor.copy(alpha = 0.9f), RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("◁", color = Color.White, fontSize = 14.sp)
+                            }
+                            // Right handle
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .offset(x = with(density) { (endFrac * timelineWidthPx - 14f).coerceIn(0f, (timelineWidthPx - 28f).coerceAtLeast(0f)).toDp() })
+                                    .width(28.dp)
+                                    .fillMaxHeight()
+                                    .background(hColor.copy(alpha = 0.9f), RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("▷", color = Color.White, fontSize = 14.sp)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Time ruler tick marks
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Start Adjust", fontSize = 10.sp, color = Color.Gray)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Button(
-                                    onClick = { startVal = (startVal - 500f / videoDurationMs).coerceIn(0f, endVal - 0.01f) },
-                                    contentPadding = PaddingValues(horizontal = 8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                                    modifier = Modifier.height(28.dp)
-                                ) {
-                                    Text("-0.5s", fontSize = 10.sp, color = Color.White)
-                                }
-                                Button(
-                                    onClick = { startVal = (startVal + 500f / videoDurationMs).coerceIn(0f, endVal - 0.01f) },
-                                    contentPadding = PaddingValues(horizontal = 8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                                    modifier = Modifier.height(28.dp)
-                                ) {
-                                    Text("+0.5s", fontSize = 10.sp, color = Color.White)
-                                }
+                        listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { f ->
+                            Text(
+                                formatTimeShort((f * videoDurationMs).toLong()),
+                                color = Color.Gray,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // ── Fine adjustment controls ───────────────────────────
+                    when (editMode) {
+                        EditMode.TRIM, EditMode.DELETE -> {
+                            val label1 = if (editMode == EditMode.TRIM) "In Point" else "Del Start"
+                            val label2 = if (editMode == EditMode.TRIM) "Out Point" else "Del End"
+                            val accent  = if (editMode == EditMode.DELETE) Color(0xFFEF5350) else MaterialTheme.colorScheme.primary
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FineAdjustColumn(
+                                    label = label1,
+                                    value = formatTime(startMs),
+                                    accent = accent,
+                                    modifier = Modifier.weight(1f),
+                                    // Guard: videoDurationMs==0 would divide by zero
+                                    onMinus = { if (videoDurationMs > 0) startFrac = (startFrac - 100f / videoDurationMs).coerceIn(0f, endFrac - 0.001f) },
+                                    onPlus  = { if (videoDurationMs > 0) startFrac = (startFrac + 100f / videoDurationMs).coerceIn(0f, endFrac - 0.001f) }
+                                )
+                                FineAdjustColumn(
+                                    label = label2,
+                                    value = formatTime(endMs),
+                                    accent = accent,
+                                    modifier = Modifier.weight(1f),
+                                    onMinus = { if (videoDurationMs > 0) endFrac = (endFrac - 100f / videoDurationMs).coerceIn(startFrac + 0.001f, 1f) },
+                                    onPlus  = { if (videoDurationMs > 0) endFrac = (endFrac + 100f / videoDurationMs).coerceIn(startFrac + 0.001f, 1f) }
+                                )
                             }
                         }
-
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("End Adjust", fontSize = 10.sp, color = Color.Gray)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Button(
-                                    onClick = { endVal = (endVal - 500f / videoDurationMs).coerceIn(startVal + 0.01f, 1f) },
-                                    contentPadding = PaddingValues(horizontal = 8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                                    modifier = Modifier.height(28.dp)
-                                ) {
-                                    Text("-0.5s", fontSize = 10.sp, color = Color.White)
-                                }
-                                Button(
-                                    onClick = { endVal = (endVal + 500f / videoDurationMs).coerceIn(startVal + 0.01f, 1f) },
-                                    contentPadding = PaddingValues(horizontal = 8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                                    modifier = Modifier.height(28.dp)
-                                ) {
-                                    Text("+0.5s", fontSize = 10.sp, color = Color.White)
-                                }
+                        EditMode.SPLIT -> {
+                            // Quick split position controls
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    "Drag timeline or use fine controls to set split point",
+                                    color = Color.Gray, fontSize = 11.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                FineAdjustColumn(
+                                    label = "Split Point",
+                                    value = formatTime(splitMs),
+                                    accent = Color(0xFFFFD54F),
+                                    modifier = Modifier.fillMaxWidth(0.6f),
+                                    onMinus = {
+                                        val newMs = (splitMs - 100L).coerceAtLeast(0L)
+                                        playFrac = newMs.toFloat() / videoDurationMs
+                                        exoPlayer.seekTo(newMs)
+                                    },
+                                    onPlus = {
+                                        val newMs = (splitMs + 100L).coerceAtMost(videoDurationMs)
+                                        playFrac = newMs.toFloat() / videoDurationMs
+                                        exoPlayer.seekTo(newMs)
+                                    }
+                                )
                             }
                         }
                     }
+
+                    Spacer(Modifier.height(4.dp))
+
+                    // Help text
+                    Text(
+                        text = when (editMode) {
+                            EditMode.TRIM   -> "Drag handles or tap timeline to set In/Out points. Only the selected region is saved."
+                            EditMode.DELETE -> "Drag handles to mark the segment to remove. Both sides are joined together."
+                            EditMode.SPLIT  -> "Set the split point. Two separate video files will be saved."
+                        },
+                        color = Color.Gray,
+                        fontSize = 10.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                    )
                 }
             }
+
+            Spacer(Modifier.height(12.dp))
         }
     }
 
-    // Trimming Loader Overlay
-    if (isTrimming) {
+    // ── Processing overlay ────────────────────────────────────────────────────
+    if (isProcessing) {
         Dialog(
             onDismissRequest = {},
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
         ) {
             Card(
                 shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .padding(24.dp)
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1F)),
+                modifier = Modifier.fillMaxWidth(0.85f)
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp),
+                    modifier = Modifier.padding(28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        "Trimming Video...",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = MaterialTheme.colorScheme.onSurface
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(52.dp),
+                        strokeWidth = 4.dp
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(Modifier.height(20.dp))
+                    Text(processingLabel, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color.White)
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { processingProgress },
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = Color.DarkGray,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))
+                    )
+                    Spacer(Modifier.height(6.dp))
                     Text(
-                        "Processing frame samples. Please keep ScreenX open.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        "${(processingProgress * 100).toInt()}%",
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Please keep ScreenX open",
+                        fontSize = 11.sp,
+                        color = Color.Gray,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -652,26 +855,359 @@ fun TrimmerEditor(
     }
 }
 
+// ─── Small composable helpers ─────────────────────────────────────────────────
+
+@Composable
+private fun InfoChip(label: String, value: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, fontSize = 10.sp, color = Color.Gray)
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color)
+    }
+}
+
+@Composable
+private fun FineAdjustColumn(
+    label: String,
+    value: String,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit
+) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, fontSize = 10.sp, color = Color.Gray)
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = accent)
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            SmallAdjustBtn("-0.1s", onMinus)
+            SmallAdjustBtn("+0.1s", onPlus)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            SmallAdjustBtn("-1s") {
+                repeat(10) { onMinus() }
+            }
+            SmallAdjustBtn("+1s") {
+                repeat(10) { onPlus() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmallAdjustBtn(text: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 8.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C2C2E)),
+        modifier = Modifier.height(26.dp)
+    ) {
+        Text(text, fontSize = 9.sp, color = Color.White)
+    }
+}
+
+// ─── Video editing operations ─────────────────────────────────────────────────
+
+/** Throttled progress helper — only dispatches when delta > 1% to avoid coroutine floods. */
+private fun makeProgressCallback(
+    scope: kotlinx.coroutines.CoroutineScope,
+    setProgress: (Float) -> Unit
+): (Float) -> Unit {
+    var lastReported = -1f
+    return { p ->
+        if (p - lastReported >= 0.01f || p >= 1f) {
+            lastReported = p
+            scope.launch(Dispatchers.Main) { setProgress(p) }
+        }
+    }
+}
+
+private fun executeTrim(
+    context: Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    sourceUri: Uri,
+    videoName: String,
+    startMs: Long,
+    endMs: Long,
+    setProcessing: (Boolean) -> Unit,
+    setProgress: (Float) -> Unit,
+    setLabel: (String) -> Unit,
+    onSuccess: () -> Unit
+) {
+    if (endMs <= startMs + 500L) {
+        Toast.makeText(context, "Selection must be at least 0.5 seconds", Toast.LENGTH_SHORT).show()
+        return
+    }
+    setProcessing(true)
+    setLabel("Trimming Video…")
+    val progressCb = makeProgressCallback(scope, setProgress)
+    scope.launch(Dispatchers.IO) {
+        var tempFile: File? = null
+        try {
+            tempFile = File(context.cacheDir, "trim_${System.currentTimeMillis()}.mp4")
+            VideoTrimmer.trim(
+                context = context,
+                sourceUri = sourceUri,
+                outputFile = tempFile,
+                startMs = startMs,
+                endMs = endMs,
+                progressCallback = progressCb
+            )
+            saveVideoToMediaStore(context, tempFile, videoName, endMs - startMs)
+            tempFile = null  // saveVideoToMediaStore deletes it
+            withContext(Dispatchers.Main) {
+                setProcessing(false)
+                Toast.makeText(context, "Trimmed video saved!", Toast.LENGTH_SHORT).show()
+                onSuccess()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            tempFile?.delete()
+            withContext(Dispatchers.Main) {
+                setProcessing(false)
+                Toast.makeText(context, "Trim failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+}
+
+private fun executeDelete(
+    context: Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    sourceUri: Uri,
+    videoName: String,
+    totalDurationMs: Long,
+    cutStartMs: Long,
+    cutEndMs: Long,
+    setProcessing: (Boolean) -> Unit,
+    setProgress: (Float) -> Unit,
+    setLabel: (String) -> Unit,
+    onSuccess: () -> Unit
+) {
+    if (cutEndMs <= cutStartMs + 500L) {
+        Toast.makeText(context, "Delete segment must be at least 0.5 seconds", Toast.LENGTH_SHORT).show()
+        return
+    }
+    setProcessing(true)
+    setLabel("Deleting Segment…")
+    val progressCb = makeProgressCallback(scope, setProgress)
+    scope.launch(Dispatchers.IO) {
+        var tempFile: File? = null
+        try {
+            tempFile = File(context.cacheDir, "delete_${System.currentTimeMillis()}.mp4")
+            VideoTrimmer.cutMiddle(
+                context = context,
+                sourceUri = sourceUri,
+                outputFile = tempFile,
+                cutStartMs = cutStartMs,
+                cutEndMs = cutEndMs,
+                progressCallback = progressCb
+            )
+            val outDuration = (totalDurationMs - (cutEndMs - cutStartMs)).coerceAtLeast(0L)
+            saveVideoToMediaStore(context, tempFile, videoName, outDuration)
+            tempFile = null
+            withContext(Dispatchers.Main) {
+                setProcessing(false)
+                Toast.makeText(context, "Segment deleted & saved!", Toast.LENGTH_SHORT).show()
+                onSuccess()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            tempFile?.delete()
+            withContext(Dispatchers.Main) {
+                setProcessing(false)
+                Toast.makeText(context, "Delete failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+}
+
+private fun executeSplit(
+    context: Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    sourceUri: Uri,
+    videoName: String,
+    totalDurationMs: Long,
+    splitMs: Long,
+    setProcessing: (Boolean) -> Unit,
+    setProgress: (Float) -> Unit,
+    setLabel: (String) -> Unit,
+    onSuccess: () -> Unit
+) {
+    if (splitMs < 500L) {
+        Toast.makeText(context, "Split point must be at least 0.5s from start", Toast.LENGTH_SHORT).show()
+        return
+    }
+    // Guard: Part B would be empty if split is at the very end
+    if (totalDurationMs > 0 && splitMs >= totalDurationMs - 500L) {
+        Toast.makeText(context, "Split point must be at least 0.5s from end", Toast.LENGTH_SHORT).show()
+        return
+    }
+    setProcessing(true)
+    setLabel("Splitting Video…")
+    val progressCb = makeProgressCallback(scope, setProgress)
+    scope.launch(Dispatchers.IO) {
+        val ts   = System.currentTimeMillis()
+        val outA = File(context.cacheDir, "splitA_$ts.mp4")
+        val outB = File(context.cacheDir, "splitB_${ts + 1}.mp4")
+        try {
+            VideoTrimmer.split(
+                context = context,
+                sourceUri = sourceUri,
+                outputA = outA,
+                outputB = outB,
+                splitMs = splitMs,
+                progressCallback = progressCb
+            )
+            val cleanName  = videoName.substringBefore(".mp4")
+            val partBDurMs = (totalDurationMs - splitMs).coerceAtLeast(0L)
+            saveVideoToMediaStore(context, outA, "${cleanName}_part1.mp4", splitMs)
+            outA.takeIf { it.exists() }?.delete()  // deleted by saveVideoToMediaStore; just in case
+            saveVideoToMediaStore(context, outB, "${cleanName}_part2.mp4", partBDurMs)
+            outB.takeIf { it.exists() }?.delete()
+            withContext(Dispatchers.Main) {
+                setProcessing(false)
+                Toast.makeText(context, "Split into Part 1 & Part 2 — saved!", Toast.LENGTH_SHORT).show()
+                onSuccess()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Clean up temp files on failure
+            outA.takeIf { it.exists() }?.delete()
+            outB.takeIf { it.exists() }?.delete()
+            withContext(Dispatchers.Main) {
+                setProcessing(false)
+                Toast.makeText(context, "Split failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+}
+
+// ─── Utility functions ────────────────────────────────────────────────────────
+
+private suspend fun loadFrameThumbnails(
+    context: Context,
+    uri: Uri,
+    durationMs: Long,
+    count: Int
+): List<Bitmap?> {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(context, uri)
+        (0 until count).map { i ->
+            val timeUs = (i.toLong() * durationMs / count) * 1000L
+            try {
+                retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            } catch (_: Exception) { null }
+        }
+    } catch (_: Exception) {
+        List(count) { null }
+    } finally {
+        retriever.release()
+    }
+}
+
+private fun formatTime(ms: Long): String {
+    if (ms < 0) return "00:00.0"
+    val milli = (ms % 1000) / 100
+    val sec   = (ms / 1000) % 60
+    val min   = (ms / 60000) % 60
+    val hour  = ms / 3600000
+    return if (hour > 0)
+        String.format("%d:%02d:%02d.%d", hour, min, sec, milli)
+    else
+        String.format("%02d:%02d.%d", min, sec, milli)
+}
+
+private fun formatTimeShort(ms: Long): String {
+    if (ms < 0) return "0s"
+    val sec = ms / 1000
+    val min = sec / 60
+    return if (min > 0) "${min}m${sec % 60}s" else "${sec}s"
+}
+
+private fun queryVideoDuration(context: Context, uri: Uri): Long {
+    var duration = 0L
+    try {
+        context.contentResolver.query(
+            uri, arrayOf(MediaStore.Video.Media.DURATION), null, null, null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                duration = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION))
+            }
+        }
+    } catch (_: Exception) {}
+    if (duration <= 0L) {
+        try {
+            val r = MediaMetadataRetriever()
+            r.setDataSource(context, uri)
+            duration = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0L
+            r.release()
+        } catch (_: Exception) {}
+    }
+    return duration
+}
+
+private fun saveVideoToMediaStore(
+    context: Context,
+    tempFile: File,
+    originalName: String,
+    durationMs: Long
+) {
+    val cleanName = originalName.substringBefore(".mp4")
+    val outName = "${cleanName}_${System.currentTimeMillis()}.mp4"
+    val contentValues = ContentValues().apply {
+        put(MediaStore.Video.Media.DISPLAY_NAME, outName)
+        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/ScreenX")
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }
+        put(MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
+    }
+    val resolver = context.contentResolver
+    val videoUri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues) ?: return
+    try {
+        resolver.openOutputStream(videoUri)?.use { out ->
+            tempFile.inputStream().use { it.copyTo(out) }
+        }
+        val updateValues = ContentValues().apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Video.Media.IS_PENDING, 0)
+            if (durationMs != Long.MAX_VALUE) put(MediaStore.Video.Media.DURATION, durationMs)
+            put(MediaStore.Video.Media.SIZE, tempFile.length())
+        }
+        resolver.update(videoUri, updateValues, null, null)
+    } catch (e: Exception) {
+        e.printStackTrace()
+    } finally {
+        tempFile.delete()
+    }
+}
+
+// ─── Recent videos card ───────────────────────────────────────────────────────
+
 @Composable
 fun RecentSelectCard(video: RecordedVideo, onClick: () -> Unit) {
     val context = LocalContext.current
     var thumbnail by remember(video.uri) { mutableStateOf<Bitmap?>(null) }
-
     LaunchedEffect(video.uri) {
-        thumbnail = loadVideoThumbnail(context, video.uri)
+        thumbnail = withContext(Dispatchers.IO) {
+            try {
+                val r = MediaMetadataRetriever()
+                r.setDataSource(context, video.uri)
+                val bmp = r.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                r.release()
+                bmp
+            } catch (_: Exception) { null }
+        }
     }
 
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }
     ) {
         Row(
-            modifier = Modifier
-                .padding(12.dp)
-                .fillMaxWidth(),
+            modifier = Modifier.padding(12.dp).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -683,124 +1219,20 @@ fun RecentSelectCard(video: RecordedVideo, onClick: () -> Unit) {
             ) {
                 if (thumbnail != null) {
                     Image(
-                        bitmap = thumbnail!!.asImageBitmap(),
-                        contentDescription = null,
+                        bitmap = thumbnail!!.asImageBitmap(), null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    Icon(
-                        imageVector = Icons.Default.PlayCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Icon(Icons.Default.PlayCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                 }
             }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = video.name,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "Duration: ${VideoHelper.formatDuration(video.duration)}",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(video.name, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("Duration: ${VideoHelper.formatDuration(video.duration)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-private fun formatTime(ms: Long): String {
-    val sec = (ms / 1000) % 60
-    val min = (ms / (1000 * 60)) % 60
-    val hour = (ms / (1000 * 60 * 60)) % 24
-    val milli = (ms % 1000) / 100
-
-    return if (hour > 0) {
-        String.format("%d:%02d:%02d.%d", hour, min, sec, milli)
-    } else {
-        String.format("%02d:%02d.%d", min, sec, milli)
-    }
-}
-
-private fun queryVideoDuration(context: Context, uri: Uri): Long {
-    var duration = 0L
-    val projection = arrayOf(MediaStore.Video.Media.DURATION)
-    try {
-        context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                duration = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION))
-            }
-        }
-    } catch (e: Exception) {
-        e.printStackTrace()
-    }
-    // Fallback: Use MediaMetadataRetriever
-    if (duration <= 0L) {
-        try {
-            val retriever = android.media.MediaMetadataRetriever()
-            retriever.setDataSource(context, uri)
-            val durationStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
-            duration = durationStr?.toLong() ?: 0L
-            retriever.release()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-    return duration
-}
-
-private fun saveVideoToMediaStore(context: Context, tempFile: File, originalName: String, durationMs: Long) {
-    val cleanName = originalName.substringBefore(".mp4")
-    val trimmedName = "${cleanName}_trimmed_${System.currentTimeMillis()}.mp4"
-    val contentValues = ContentValues().apply {
-        put(MediaStore.Video.Media.DISPLAY_NAME, trimmedName)
-        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/ScreenX")
-            put(MediaStore.Video.Media.IS_PENDING, 1)
-        }
-        put(MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
-    }
-
-    val resolver = context.contentResolver
-    val collectionUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-    val videoUri = resolver.insert(collectionUri, contentValues)
-
-    if (videoUri != null) {
-        try {
-            resolver.openOutputStream(videoUri)?.use { outputStream ->
-                tempFile.inputStream().use { inputStream ->
-                    inputStream.copyTo(outputStream)
-                }
-            }
-
-            val updateValues = ContentValues().apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Video.Media.IS_PENDING, 0)
-                }
-                put(MediaStore.Video.Media.DURATION, durationMs)
-                put(MediaStore.Video.Media.RESOLUTION, "Trimmed")
-                put(MediaStore.Video.Media.SIZE, tempFile.length())
-            }
-            resolver.update(videoUri, updateValues, null, null)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        } finally {
-            if (tempFile.exists()) {
-                tempFile.delete()
-            }
+            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
